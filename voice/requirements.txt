@@ -1,0 +1,18 @@
+# Local voice server dependencies.
+#
+# PyTorch is deliberately NOT listed here: it must come from the cu128 index
+# (Blackwell sm_120 has no kernels in cu124 or earlier). Install it first:
+#
+#   pip install torch --index-url https://download.pytorch.org/whl/cu128
+#
+# then:  pip install -r requirements.txt
+
+fastapi>=0.115
+uvicorn[standard]>=0.32
+python-multipart>=0.0.9      # required by FastAPI for multipart file uploads
+pydantic>=2.9
+
+faster-whisper>=1.1.0        # CTranslate2 Whisper; resolves large-v3-turbo on first use
+kokoro>=0.9.4                # Kokoro-82M TTS, Apache-2.0
+soundfile>=0.12.1
+numpy>=1.26

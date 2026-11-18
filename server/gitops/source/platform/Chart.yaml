@@ -1,0 +1,23 @@
+apiVersion: v2
+name: platform
+description: |
+  Postgres, the LiteLLM gateway, n8n, Open WebUI and the in-cluster names for
+  the model servers that run on the host.
+
+  This chart is a faithful port of server/k8s/10-postgres.yaml through
+  13-open-webui.yaml plus 03-host-models.yaml. It is deliberately a port and
+  not a redesign: the first thing it has to do is render to exactly what is
+  already running, so that adopting it into Argo CD is a no-op rather than a
+  rollout. Change behaviour in a second commit, where the diff is readable.
+
+  What is NOT here, and why:
+
+    namespaces and quotas  bootstrap, applied before Argo CD exists
+    PersistentVolumes      Argo CD pruning a PVC is data loss, so storage
+                           stays outside anything with a sync policy
+    Secrets                generated into /srv/platform/secrets and applied
+                           by 03-platform.sh; nothing secret is ever written
+                           into this repository, which is mirrored to GitHub
+type: application
+version: 1.0.0
+appVersion: "1.0"

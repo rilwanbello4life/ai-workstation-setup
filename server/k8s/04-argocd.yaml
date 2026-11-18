@@ -1,0 +1,60 @@
+# The Argo CD namespace, its ceiling and its defaults.
+#
+# Separate from 'platform' for one practical reason: ai-pause scales whole
+# namespaces to zero, and Argo CD has to go down FIRST and come back up LAST.
+# If it were in 'platform' it would be scaled in the same pass as everything
+# else and would spend the intervening seconds reconciling the very
+# deployments ai-pause was trying to stop.
+#
+# It carries the same pausable label as platform and games, because Argo CD
+# has nothing useful to do while a 60 GB model holds the machine, and its
+# ~1 GB is worth more to Strata than to a reconciliation loop. That matters
+# most in the 64 GB configuration, where the experts budget and the IQ2_XS
+# pack are within a gigabyte of each other.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: argocd
+  labels:
+    ai-workstation/pausable: "true"
+---
+# The ceiling. The four components this install keeps - application
+# controller, repo-server, redis and server - request 960Mi between them.
+#
+# The quota is 1280Mi rather than 1Gi for a specific reason: the chart also
+# runs short-lived hooks, and a quota that exactly fits the steady state
+# leaves nothing for them. An admission rejection on a hook does not fail
+# loudly - it leaves Argo CD half installed and apparently fine until the
+# first sync, so the slack is worth more than the 256Mi it costs.
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: argocd-ceiling
+  namespace: argocd
+spec:
+  hard:
+    requests.memory: 1280Mi
+    limits.memory: 2560Mi
+    requests.cpu: "1500m"
+---
+# Defaults for anything that arrives without its own resource block.
+#
+# The ResourceQuota above makes requests and limits mandatory for every pod in
+# this namespace. The upstream chart ships hooks and init containers that do
+# not always declare them, and a rejected hook shows up as a chart that half
+# installs rather than as an obvious error. A LimitRange supplies the missing
+# values instead of letting admission fail.
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: argocd-defaults
+  namespace: argocd
+spec:
+  limits:
+    - type: Container
+      default:
+        memory: 192Mi
+        cpu: 200m
+      defaultRequest:
+        memory: 48Mi
+        cpu: 10m

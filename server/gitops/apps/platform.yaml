@@ -1,0 +1,54 @@
+# Postgres, LiteLLM, n8n, Open WebUI and the host model Services.
+#
+# Adopted from manifests that server/03-platform.sh had already applied, which
+# is why this starts with no automated sync policy at all. The order is:
+#
+#   1. gitops diff        prove the render matches what is live
+#   2. gitops sync platform   Argo CD reports Synced, changing nothing
+#   3. gitops automate platform   only once step 2 has been boring twice
+#
+# Turning automation on before step 2 is clean means the first reconciliation
+# is also the first time anyone finds out what drifted.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: platform
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: git://gitops.platform.svc.cluster.local:9418/gitops.git
+    targetRevision: HEAD
+    path: rendered/platform
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: platform
+
+  # No `automated` key: manual sync until you say otherwise.
+  # `gitops automate platform` adds:
+  #     automated: {prune: false, selfHeal: true}
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=false
+
+  # ---------------------------------------------------------------------
+  # The setting that keeps ai-pause working.
+  #
+  # ai-pause frees ~15 GB by scaling every Deployment in this namespace to
+  # zero, and `games stop` does the same for one game server. Argo CD with
+  # selfHeal considers replicas:0 a drift from the manifest's replicas:1 and
+  # scales it straight back up - usually within a couple of seconds, so the
+  # memory never actually comes back and the cause is not obvious.
+  #
+  # Ignoring /spec/replicas means the replica count is owned by whoever set
+  # it last, which is what you want on a machine where pausing the platform
+  # is a normal part of running a big model.
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/replicas
+    - group: apps
+      kind: StatefulSet
+      jsonPointers:
+        - /spec/replicas

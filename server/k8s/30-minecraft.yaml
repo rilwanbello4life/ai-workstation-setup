@@ -1,0 +1,149 @@
+# Minecraft Java server.
+#
+# RAM is the whole story here. The games ResourceQuota allows 8Gi of requests
+# across the namespace, and this asks for 4Gi - half of it for one server.
+# That is intentional: a Minecraft server that is given less than it needs
+# does not fail, it just stutters, which is harder to notice than a crash.
+#
+# Memory taken here is memory Strata cannot use. 4 GB of Minecraft moves you
+# from the IQ2_XS ceiling down toward Q2_0. Run 'ai-status' before starting a
+# game server and 'ai-pause --games' before loading a larger pack.
+#
+# Service type LoadBalancer uses k3s's built-in klipper-lb, which binds the
+# port on the host. The firewall from 01-server-base.sh denies inbound on
+# everything except tailscale0, so in practice players reach this over
+# Tailscale and not from the open internet. That is the intended design: see
+# the exposure section of reference/game-servers in server-architecture.md.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: minecraft-pv
+spec:
+  capacity:
+    storage: 50Gi
+  accessModes: [ReadWriteOnce]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: srv-local
+  hostPath:
+    path: /srv/games/minecraft
+    type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: minecraft-data
+  namespace: games
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: srv-local
+  resources:
+    requests:
+      storage: 50Gi
+  volumeName: minecraft-pv
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minecraft
+  namespace: games
+spec:
+  replicas: 1
+  # Recreate, not RollingUpdate: two servers cannot hold the same world
+  # directory, and the second would corrupt it trying.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels: { app: minecraft }
+  template:
+    metadata:
+      labels: { app: minecraft }
+    spec:
+      containers:
+        - name: minecraft
+          image: itzg/minecraft-server:java21
+          env:
+            - name: EULA
+              value: "TRUE"
+            - name: TYPE
+              value: "PAPER"          # Paper over vanilla: markedly lower CPU per player
+            - name: VERSION
+              value: "LATEST"
+            - name: MEMORY
+              value: "3G"             # under the 4Gi limit - the JVM needs headroom
+                                      # outside the heap for metaspace and GC
+            - name: USE_AIKAR_FLAGS
+              value: "TRUE"
+            - name: MAX_PLAYERS
+              value: "10"
+            - name: VIEW_DISTANCE
+              value: "8"              # 10+ multiplies world-gen CPU and RAM sharply
+            - name: ENABLE_RCON
+              value: "TRUE"
+            - name: RCON_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: minecraft-rcon
+                  key: password
+            - name: TZ
+              value: "UTC"
+          ports:
+            - containerPort: 25565
+              name: minecraft
+            - containerPort: 25575
+              name: rcon
+          resources:
+            requests:
+              memory: "4Gi"
+              cpu: "1"
+            limits:
+              memory: "4Gi"           # equal to the request: the JVM is told its
+                                      # heap up front, so bursting buys nothing
+              cpu: "3"
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          readinessProbe:
+            exec:
+              command: ["mc-health"]
+            initialDelaySeconds: 60
+            periodSeconds: 20
+            failureThreshold: 10      # world generation on first boot is slow
+          livenessProbe:
+            exec:
+              command: ["mc-health"]
+            initialDelaySeconds: 300
+            periodSeconds: 60
+            failureThreshold: 5
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: minecraft-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minecraft
+  namespace: games
+spec:
+  type: LoadBalancer
+  selector: { app: minecraft }
+  ports:
+    - name: minecraft
+      port: 25565
+      targetPort: 25565
+      protocol: TCP
+---
+# RCON stays ClusterIP. It is a remote console with full server authority and
+# has no business being reachable from outside the cluster.
+apiVersion: v1
+kind: Service
+metadata:
+  name: minecraft-rcon
+  namespace: games
+spec:
+  type: ClusterIP
+  selector: { app: minecraft }
+  ports:
+    - name: rcon
+      port: 25575
+      targetPort: 25575

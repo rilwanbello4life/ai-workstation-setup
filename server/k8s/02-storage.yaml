@@ -1,0 +1,101 @@
+# Persistent storage pinned to /srv/platform rather than k3s's own directory.
+#
+# Why not just use the local-path StorageClass: its data lives under
+# /var/lib/rancher/k3s/storage with generated directory names, which makes
+# backups and manual recovery unnecessarily hard. Explicit hostPath volumes on
+# /srv give one obvious backup target and survive a cluster rebuild.
+#
+# These are single-node volumes by definition. There is no replication and no
+# failover; see the backup section of reference/server-architecture.md.
+#
+# WaitForFirstConsumer rather than Immediate: with one node it makes no
+# scheduling difference, but it keeps the claim Pending until a pod actually
+# needs it, which makes a misconfigured workload easier to diagnose.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: srv-local
+provisioner: kubernetes.io/no-provisioner
+volumeBindingMode: WaitForFirstConsumer
+reclaimPolicy: Retain
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: postgres-pv
+spec:
+  capacity:
+    storage: 50Gi
+  accessModes: [ReadWriteOnce]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: srv-local
+  hostPath:
+    path: /srv/platform/postgres
+    type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-data
+  namespace: platform
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: srv-local
+  resources:
+    requests:
+      storage: 50Gi
+  volumeName: postgres-pv
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: n8n-pv
+spec:
+  capacity:
+    storage: 20Gi
+  accessModes: [ReadWriteOnce]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: srv-local
+  hostPath:
+    path: /srv/platform/n8n
+    type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: n8n-data
+  namespace: platform
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: srv-local
+  resources:
+    requests:
+      storage: 20Gi
+  volumeName: n8n-pv
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: openwebui-pv
+spec:
+  capacity:
+    storage: 20Gi
+  accessModes: [ReadWriteOnce]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: srv-local
+  hostPath:
+    path: /srv/platform/openwebui
+    type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: openwebui-data
+  namespace: platform
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: srv-local
+  resources:
+    requests:
+      storage: 20Gi
+  volumeName: openwebui-pv

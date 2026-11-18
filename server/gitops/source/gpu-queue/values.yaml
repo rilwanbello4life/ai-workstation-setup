@@ -1,0 +1,49 @@
+namespace: platform
+
+image:
+  repository: localhost/gpu-queue
+  # Rewritten by `gitops build gpu-queue` with a timestamp. Keep the quotes:
+  # an unquoted 20260101-120000 is still a string, but 20260101 alone would
+  # be parsed as a number and the tag would not match.
+  tag: "bootstrap"
+  pullPolicy: Never
+
+replicas: 1
+
+resources:
+  requests:
+    memory: 256Mi
+    cpu: 50m
+  limits:
+    memory: 512Mi
+    cpu: "1"
+
+# --- admission -------------------------------------------------------------
+admission:
+  # Keep this much VRAM unclaimed at all times. The desktop holds 1-1.5 GB
+  # and Strata's KV cache grows with conversation length.
+  vramReserveMb: 2048
+  # One heavy job at a time: xhigh reasoning or a batch render can hold the
+  # card for minutes.
+  maxHeavy: 1
+  # Light jobs start at the floor and rise toward the ceiling while the card
+  # looks underused. This is the "take another job if the GPU is quiet" rule.
+  lightFloor: 2
+  lightCeiling: 4
+  idleUtilPct: 50
+  growthHeadroomMb: 2048
+  # A request naming one of these models is heavy regardless of anything else.
+  heavyModels: "brain"
+  heavyMaxTokens: 4096
+
+timeouts:
+  # How long a caller holds the connection waiting for a slot.
+  queueSeconds: 600
+  # Long enough for a 125B model to answer at xhigh reasoning.
+  upstreamSeconds: 1800
+
+logLevel: INFO
+
+# Where batch job manifests are written. A hostPath because ComfyUI writes
+# the actual images on the host and only the manifest belongs to the queue.
+outputHostPath: /srv/platform/gpu-queue/outputs

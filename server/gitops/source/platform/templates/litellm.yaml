@@ -1,0 +1,98 @@
+{{- /*
+LiteLLM: the gateway that makes "expose models" survivable.
+
+Virtual keys with budgets and rate limits, one OpenAI-compatible endpoint in
+front of Strata and llama.cpp, and request logging to Postgres.
+
+Since the GPU queue was added this is no longer the front door - gpu-queue on
+4100 is - but it is still the authority on authorisation. The queue forwards
+the caller's own key here unchanged, so budgets, rate limits, model allowlists
+and spend accounting all keep working exactly as before.
+*/}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: litellm
+  namespace: {{ .Values.namespace }}
+spec:
+  selector:
+    app: litellm
+  ports:
+    - port: 4000
+      targetPort: 4000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: litellm
+  namespace: {{ .Values.namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: litellm
+  template:
+    metadata:
+      labels:
+        app: litellm
+      annotations:
+        # Roll the pod when the config changes. Without this a values edit
+        # updates the ConfigMap and nothing picks it up until the next
+        # unrelated restart, which is a genuinely confusing way to lose an
+        # afternoon.
+        checksum/config: {{ include "platform.litellmConfig" . | sha256sum }}
+    spec:
+      containers:
+        - name: litellm
+          image: {{ .Values.litellm.image }}
+          args: ["--config", "/config/config.yaml", "--port", "4000"]
+          ports:
+            - containerPort: 4000
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: litellm-credentials
+                  key: database-url
+            - name: LITELLM_MASTER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: litellm-credentials
+                  key: master-key
+            - name: LITELLM_SALT_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: litellm-credentials
+                  key: salt-key
+            - name: STORE_MODEL_IN_DB
+              value: "True"
+          resources:
+{{ toYaml .Values.litellm.resources | indent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /config
+          readinessProbe:
+            httpGet:
+              path: /health/liveliness
+              port: 4000
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health/liveliness
+              port: 4000
+            initialDelaySeconds: 90
+            periodSeconds: 30
+      volumes:
+        - name: config
+          configMap:
+            name: litellm-config
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: litellm-config
+  namespace: {{ .Values.namespace }}
+data:
+  config.yaml: |
+{{ include "platform.litellmConfig" . | indent 4 }}

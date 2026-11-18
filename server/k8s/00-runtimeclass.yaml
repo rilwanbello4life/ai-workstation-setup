@@ -1,0 +1,14 @@
+# RuntimeClass for GPU workloads.
+#
+# k3s detects the NVIDIA container runtime at startup and registers it in its
+# containerd config as "nvidia". A pod opts into the GPU by setting
+# runtimeClassName: nvidia and requesting nvidia.com/gpu.
+#
+# This does not make the card shareable. The device plugin advertises exactly
+# one GPU and assigns it whole. While Strata holds the card on the host, a pod
+# requesting it will start but find almost no free VRAM - run `ai-pause` first.
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: nvidia
+handler: nvidia

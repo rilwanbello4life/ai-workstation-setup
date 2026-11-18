@@ -1,0 +1,46 @@
+# Copied to /srv/gitops/.gitignore by server/08-gitops.sh.
+#
+# This repository is mirrored to GitHub. Treat everything in it as published,
+# even though the mirror is private - a private repo that becomes public by
+# accident is a routine mistake, and a leaked credential is not recoverable
+# by making it private again.
+#
+# Secrets belong in /srv/platform/secrets (mode 600, outside this tree) and
+# are applied to the cluster by server/03-platform.sh. Manifests reference
+# them with secretKeyRef and never contain a value.
+
+# Kubernetes Secret manifests, under any name
+*secret*.yaml
+*secrets*.yaml
+*-secret.yml
+
+# Key material
+*.key
+*.pem
+*.p12
+*.pfx
+*.crt
+*.jks
+id_rsa*
+id_ed25519*
+
+# Environment files, which are where credentials end up when someone is
+# in a hurry
+.env
+.env.*
+*.envrc
+
+# Helm's own leavings
+charts/*.tgz
+**/charts/*.tgz
+*.lock
+
+# Render scratch space. `gitops render` writes here before moving results
+# into place, so a failed render cannot leave a half-written manifest that
+# Argo CD would happily apply.
+.render-tmp/
+
+# Editor noise
+*.swp
+*~
+.DS_Store

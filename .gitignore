@@ -1,0 +1,27 @@
+# Python bytecode, produced whenever a helper is imported or compiled.
+__pycache__/
+*.pyc
+*.pyo
+
+# macOS writes these into any directory a Finder window has opened.
+.DS_Store
+
+# Editor and tooling scratch.
+*.swp
+*~
+.venv/
+venv/
+
+# Nothing in this repository is a secret, and it must stay that way. The
+# patterns below are a backstop rather than a description of what is here:
+# real keys live in /srv/platform/secrets on the workstation at mode 600 and
+# are never copied into the kit. The GitOps repo at /srv/gitops has its own,
+# stricter version of this list - see reference/gitops.md.
+*.key
+*.pem
+*.p12
+.env
+.env.*
+*secret*.yaml
+*credentials*.json
+kubeconfig

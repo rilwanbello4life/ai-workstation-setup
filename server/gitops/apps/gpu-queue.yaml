@@ -1,0 +1,37 @@
+# The GPU queue: the fair-share front door for shared model access.
+#
+# Unlike the platform Application, this one is new rather than adopted, so
+# there is nothing live for it to disagree with and automation is safe from
+# the start.
+#
+# Its image is built locally and imported into k3s containerd by
+# `gitops build gpu-queue`, which also bumps the tag in values.yaml. There is
+# no registry on this machine, so imagePullPolicy must be Never - with
+# IfNotPresent a tag that failed to import falls through to a Docker Hub
+# lookup for an image that does not exist there, and the pod sits in
+# ImagePullBackOff blaming the network.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: gpu-queue
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: git://gitops.platform.svc.cluster.local:9418/gitops.git
+    targetRevision: HEAD
+    path: rendered/gpu-queue
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: platform
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/replicas

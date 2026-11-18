@@ -1,0 +1,51 @@
+{{- /*
+In-cluster DNS names for the model servers that run on the host.
+
+Strata mlocks 25-60 GB, owns the GPU and takes 1-3 minutes to load, so it
+stays outside Kubernetes. Pods still need a stable address for it. A Service
+with no selector plus a hand-written EndpointSlice gives normal cluster DNS
+pointing at the host.
+
+This replaces the envsubst substitution that server/02-k3s.sh performed on
+server/k8s/03-host-models.yaml. The host address is now .Values.hostIP, which
+is a better home for it: a value in a file Argo CD reconciles, rather than an
+environment variable that has to be correct at the moment a script runs.
+
+A Service with no selector gets no automatic endpoints, which is exactly why
+this works - we supply them ourselves.
+*/}}
+{{- range $name, $svc := .Values.hostServices }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  namespace: {{ $.Values.namespace }}
+  annotations:
+    description: {{ $svc.description | quote }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: {{ $svc.port }}
+      targetPort: {{ $svc.port }}
+      protocol: TCP
+---
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: {{ $name }}-host
+  namespace: {{ $.Values.namespace }}
+  labels:
+    kubernetes.io/service-name: {{ $name }}
+addressType: IPv4
+ports:
+  - name: http
+    port: {{ $svc.port }}
+    protocol: TCP
+endpoints:
+  - addresses:
+      - {{ $.Values.hostIP | quote }}
+    conditions:
+      ready: true
+{{- end }}

@@ -1,0 +1,47 @@
+# Two namespaces, so ai-pause can scale each independently.
+#
+#   platform  the always-on services: Postgres, LiteLLM, n8n, Open WebUI, apps
+#   games     game servers, which are the first thing to stop under pressure
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: platform
+  labels:
+    ai-workstation/pausable: "true"
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: games
+  labels:
+    ai-workstation/pausable: "true"
+---
+# A ceiling on the platform namespace. Without it a misconfigured workflow or a
+# runaway container can consume the memory Strata needs, and the kubelet will
+# evict the wrong things trying to recover.
+#
+# 20 GiB leaves the ~15 GB the platform actually uses plus room for a burst,
+# while still guaranteeing the model server its share of 64 GB.
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: platform-ceiling
+  namespace: platform
+spec:
+  hard:
+    requests.memory: 12Gi
+    limits.memory: 20Gi
+    requests.cpu: "4"
+---
+# Game servers get a smaller, harder ceiling. They are the workload most
+# likely to grow without anyone noticing.
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: games-ceiling
+  namespace: games
+spec:
+  hard:
+    requests.memory: 8Gi
+    limits.memory: 12Gi
+    requests.cpu: "4"

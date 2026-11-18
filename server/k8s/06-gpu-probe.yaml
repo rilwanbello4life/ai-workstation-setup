@@ -1,0 +1,79 @@
+# In-cluster DNS for the two host endpoints the GPU queue needs.
+#
+# gpu-probe  reports what the card is actually doing. The queue cannot make
+#            an admission decision from inside a pod without it: there is no
+#            GPU device plugin here, because Strata owns the card directly
+#            and never goes through Kubernetes.
+#
+# comfyui    the batch job target. Image and video generation is the one
+#            workload heavy enough that serialising it is the whole point of
+#            having a queue.
+#
+# ${HOST_IP} is substituted by server/09-gpu-queue.sh. Both addresses are
+# forwarded into loopback by ai-model-bridge.service, so neither service
+# binds anything beyond 127.0.0.1 itself.
+apiVersion: v1
+kind: Service
+metadata:
+  name: gpu-probe
+  namespace: platform
+  annotations:
+    description: "nvidia-smi as JSON - utilisation and free VRAM, read-only"
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 8101
+      targetPort: 8101
+      protocol: TCP
+---
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: gpu-probe-host
+  namespace: platform
+  labels:
+    kubernetes.io/service-name: gpu-probe
+addressType: IPv4
+ports:
+  - name: http
+    port: 8101
+    protocol: TCP
+endpoints:
+  - addresses:
+      - "${HOST_IP}"
+    conditions:
+      ready: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: comfyui
+  namespace: platform
+  annotations:
+    description: "ComfyUI on the host - batch image and video jobs"
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 8188
+      targetPort: 8188
+      protocol: TCP
+---
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: comfyui-host
+  namespace: platform
+  labels:
+    kubernetes.io/service-name: comfyui
+addressType: IPv4
+ports:
+  - name: http
+    port: 8188
+    protocol: TCP
+endpoints:
+  - addresses:
+      - "${HOST_IP}"
+    conditions:
+      ready: true

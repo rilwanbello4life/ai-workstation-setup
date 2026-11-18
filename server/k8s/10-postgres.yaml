@@ -1,0 +1,90 @@
+# Postgres: shared state for LiteLLM, n8n and the agent prompt store.
+#
+# One database server with three logical databases rather than three servers.
+# At ~2 GB resident this is already a meaningful slice of the memory budget,
+# and running three would cost triple for no isolation benefit on a single
+# node where everything shares a kernel anyway.
+#
+# A Deployment rather than a StatefulSet: there is exactly one replica, one
+# node and one hostPath volume, so StatefulSet's ordering and stable identity
+# guarantees buy nothing here.
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: platform
+spec:
+  selector:
+    app: postgres
+  ports:
+    - port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: platform
+spec:
+  replicas: 1
+  strategy:
+    # Recreate, not RollingUpdate: two Postgres pods cannot share one hostPath
+    # volume, and a rolling update would try exactly that.
+    type: Recreate
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      securityContext:
+        fsGroup: 999
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: password
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          # Tuned down from defaults. Postgres sizes itself for a dedicated
+          # host; here it is one tenant among several and must not expand into
+          # memory the model server needs.
+          args:
+            - -c
+            - shared_buffers=512MB
+            - -c
+            - effective_cache_size=1536MB
+            - -c
+            - max_connections=100
+          resources:
+            requests:
+              memory: 1Gi
+              cpu: 250m
+            limits:
+              memory: 2Gi
+              cpu: "2"
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec:
+              command: [sh, -c, "pg_isready -U postgres"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: [sh, -c, "pg_isready -U postgres"]
+            initialDelaySeconds: 60
+            periodSeconds: 30
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: postgres-data

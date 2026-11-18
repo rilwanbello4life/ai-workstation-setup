@@ -1,0 +1,120 @@
+# Valheim dedicated server.
+#
+# Valheim is UDP and needs two consecutive ports (2456 game, 2457 query). It
+# is also noticeably heavier than Minecraft per player: the world simulation
+# runs on the server and does not shard, so a large explored map costs RAM
+# whether or not anyone is standing in it.
+#
+# Running this alongside Minecraft uses the entire games quota. Pick one, or
+# raise the quota in 01-namespaces.yaml and take the memory from Strata
+# knowingly.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: valheim-pv
+spec:
+  capacity:
+    storage: 20Gi
+  accessModes: [ReadWriteOnce]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: srv-local
+  hostPath:
+    path: /srv/games/valheim
+    type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: valheim-data
+  namespace: games
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: srv-local
+  resources:
+    requests:
+      storage: 20Gi
+  volumeName: valheim-pv
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: valheim
+  namespace: games
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels: { app: valheim }
+  template:
+    metadata:
+      labels: { app: valheim }
+    spec:
+      containers:
+        - name: valheim
+          image: lloesche/valheim-server:latest
+          env:
+            - name: SERVER_NAME
+              value: "home"
+            - name: WORLD_NAME
+              value: "home"
+            - name: SERVER_PUBLIC
+              value: "false"          # not listed in the public browser; players
+                                      # join by Tailscale address
+            - name: SERVER_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: valheim-password
+                  key: password
+            - name: BACKUPS_MAX_AGE
+              value: "7"
+            - name: TZ
+              value: "UTC"
+          ports:
+            - containerPort: 2456
+              protocol: UDP
+            - containerPort: 2457
+              protocol: UDP
+          resources:
+            requests:
+              memory: "4Gi"
+              cpu: "1"
+            limits:
+              memory: "6Gi"           # the world sim grows as the map is explored
+              cpu: "3"
+          securityContext:
+            # The image uses Steam's runtime, which needs to adjust its own
+            # process limits during updates.
+            capabilities:
+              add: ["SYS_NICE"]
+          volumeMounts:
+            - name: data
+              mountPath: /config
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "pgrep valheim_server >/dev/null"]
+            initialDelaySeconds: 120  # first run downloads the server via SteamCMD
+            periodSeconds: 30
+            failureThreshold: 20
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: valheim-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: valheim
+  namespace: games
+spec:
+  type: LoadBalancer
+  selector: { app: valheim }
+  ports:
+    - name: game
+      port: 2456
+      targetPort: 2456
+      protocol: UDP
+    - name: query
+      port: 2457
+      targetPort: 2457
+      protocol: UDP

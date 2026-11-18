@@ -1,0 +1,17 @@
+# Model download manifest. Tab-separated. Lines starting with # are ignored.
+#
+# group	repo	file	destination (relative to the AI root: C:\AI or ~/ai)
+#
+# A file of "*" means download the whole repository into the destination.
+# Files are moved to the destination by basename, so repo-internal paths like
+# split_files/... do not end up nested under the ComfyUI model directories.
+
+image	Comfy-Org/z_image_turbo	split_files/diffusion_models/z_image_turbo_bf16.safetensors	comfyui/models/diffusion_models
+image	Comfy-Org/z_image_turbo	split_files/text_encoders/qwen_3_4b.safetensors	comfyui/models/text_encoders
+image	Comfy-Org/z_image_turbo	split_files/vae/ae.safetensors	comfyui/models/vae
+
+video	Comfy-Org/Wan_2.2_ComfyUI_Repackaged	split_files/diffusion_models/wan2.2_ti2v_5B_fp16.safetensors	comfyui/models/diffusion_models
+video	Comfy-Org/Wan_2.2_ComfyUI_Repackaged	split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors	comfyui/models/text_encoders
+video	Comfy-Org/Wan_2.2_ComfyUI_Repackaged	split_files/vae/wan2.2_vae.safetensors	comfyui/models/vae
+
+voice	hexgrad/Kokoro-82M	*	voice/kokoro

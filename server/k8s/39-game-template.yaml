@@ -1,0 +1,112 @@
+# Template for a game server not covered by the bundled manifests.
+#
+# Copy this file, substitute the placeholders, and apply it:
+#
+#   cp 39-game-template.yaml 32-mygame.yaml
+#   $EDITOR 32-mygame.yaml
+#   kubectl apply -f 32-mygame.yaml
+#
+# Four things to get right, in order of how much trouble they cause:
+#
+# 1. requests.memory must be honest. The games ResourceQuota is 8Gi of
+#    requests; exceeding it means the pod will not schedule, which is the
+#    correct outcome. Understating it means the kubelet evicts something
+#    under pressure, and it will not necessarily evict this.
+#
+# 2. strategy: Recreate, always. Two pods cannot share one hostPath world
+#    directory. RollingUpdate will start the new pod before stopping the old
+#    one and the second will corrupt the save.
+#
+# 3. Get the protocol right. Source-engine games, Valheim and most survival
+#    games are UDP; Minecraft is TCP. A UDP service declared TCP produces a
+#    server that looks healthy and that nobody can join.
+#
+# 4. Pin the image tag. ':latest' on a game server means an unattended
+#    restart can land on a version your players' clients cannot connect to.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: GAME-pv
+spec:
+  capacity:
+    storage: 20Gi
+  accessModes: [ReadWriteOnce]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: srv-local
+  hostPath:
+    path: /srv/games/GAME
+    type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: GAME-data
+  namespace: games
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: srv-local
+  resources:
+    requests:
+      storage: 20Gi
+  volumeName: GAME-pv
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: GAME
+  namespace: games
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels: { app: GAME }
+  template:
+    metadata:
+      labels: { app: GAME }
+    spec:
+      containers:
+        - name: GAME
+          image: REGISTRY/IMAGE:TAG
+          env:
+            - name: TZ
+              value: "UTC"
+          ports:
+            - containerPort: PORT
+              protocol: UDP
+          resources:
+            requests:
+              memory: "2Gi"
+              cpu: "500m"
+            limits:
+              memory: "3Gi"
+              cpu: "2"
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          # Without a readiness probe, the Service routes traffic to a server
+          # that is still loading its world and players get silent timeouts.
+          readinessProbe:
+            tcpSocket:
+              port: PORT
+            initialDelaySeconds: 60
+            periodSeconds: 20
+            failureThreshold: 15
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: GAME-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: GAME
+  namespace: games
+spec:
+  type: LoadBalancer
+  selector: { app: GAME }
+  ports:
+    - name: game
+      port: PORT
+      targetPort: PORT
+      protocol: UDP

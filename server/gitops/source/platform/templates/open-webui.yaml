@@ -1,0 +1,91 @@
+{{- /*
+Open WebUI, moved from a user systemd unit into the cluster.
+
+Points at LiteLLM rather than directly at Strata, so chat traffic is keyed
+and logged the same way everything else is, and so switching the resident
+Strata pack needs no change here.
+
+It talks to LiteLLM rather than to gpu-queue on purpose. Open WebUI is you,
+on your own machine, already inside the trust boundary - routing it through
+the fair-share queue would make you wait behind your own guests.
+*/}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: open-webui
+  namespace: {{ .Values.namespace }}
+spec:
+  selector:
+    app: open-webui
+  ports:
+    - port: 3000
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: open-webui
+  namespace: {{ .Values.namespace }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: open-webui
+  template:
+    metadata:
+      labels:
+        app: open-webui
+    spec:
+      containers:
+        - name: open-webui
+          image: {{ .Values.openWebui.image }}
+          ports:
+            - containerPort: 8080
+          env:
+            - name: OPENAI_API_BASE_URL
+              value: "http://litellm.{{ .Values.namespace }}.svc.cluster.local:4000/v1"
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: litellm-credentials
+                  key: master-key
+            # Audio still goes straight to the host voice server: LiteLLM
+            # proxies chat completions, not /v1/audio/*.
+            - name: AUDIO_STT_ENGINE
+              value: openai
+            - name: AUDIO_STT_OPENAI_API_BASE_URL
+              value: "http://voice.{{ .Values.namespace }}.svc.cluster.local:8100/v1"
+            - name: AUDIO_TTS_ENGINE
+              value: openai
+            - name: AUDIO_TTS_OPENAI_API_BASE_URL
+              value: "http://voice.{{ .Values.namespace }}.svc.cluster.local:8100/v1"
+            - name: WEBUI_AUTH
+              value: "True"
+            - name: WEBUI_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: openwebui-credentials
+                  key: secret-key
+            # No telemetry, and no model downloads of its own - every model
+            # comes through the gateway.
+            - name: ANONYMIZED_TELEMETRY
+              value: "False"
+            - name: ENABLE_OLLAMA_API
+              value: "False"
+          resources:
+{{ toYaml .Values.openWebui.resources | indent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /app/backend/data
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: openwebui-data

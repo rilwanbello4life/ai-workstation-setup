@@ -1,0 +1,17 @@
+apiVersion: v2
+name: gpu-queue
+description: |
+  The fair-share front door for shared model access.
+
+  Sits in front of LiteLLM and forwards the caller's own key to it unchanged,
+  so LiteLLM keeps owning budgets, rate limits, model allowlists and spend.
+  This adds the three things LiteLLM cannot see: a real queue instead of a
+  429, per-user system prompts and skills, and admission based on what the
+  GPU is actually doing.
+
+  The image is built on this machine by `gitops build gpu-queue` and imported
+  into k3s containerd. There is no registry, which is why imagePullPolicy is
+  Never.
+type: application
+version: 1.0.0
+appVersion: "1.0"

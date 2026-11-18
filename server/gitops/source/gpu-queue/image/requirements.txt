@@ -1,0 +1,7 @@
+# Pinned, because this image is built on the machine and rebuilt rarely. An
+# unpinned build that works today and fails in six months is the single most
+# annoying failure mode for infrastructure you touch twice a year.
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+httpx==0.28.1
+asyncpg==0.30.0

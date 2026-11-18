@@ -1,0 +1,53 @@
+# In-cluster DNS for the git repository that Argo CD reconciles from.
+#
+# Argo CD can read git, a Helm repository or an OCI registry. It cannot watch
+# a directory, so the "destination directory" has to have a repository behind
+# it. That repository is a bare repo on the host, served read-only by
+# git-daemon bound to the cni0 address - the same trick 03-host-models.yaml
+# uses for Strata, and for the same reason: pods need a stable name, and
+# hardcoding 10.42.0.1 into an Application is how you end up unable to move
+# anything.
+#
+# ${HOST_IP} is substituted by server/08-gitops.sh.
+#
+# Unauthenticated, deliberately. git-daemon has no auth of its own, and the
+# three things that make that acceptable are: it binds the cni0 address
+# rather than 0.0.0.0 so it is invisible to the LAN, ufw denies inbound on
+# everything except tailscale0, and the daemon is started without
+# --enable=receive-pack so nothing reachable through it can write.
+#
+# It also runs without --export-all. Only a repository containing the marker
+# file git-daemon-export-ok is served, which means a future git repo created
+# anywhere else under /srv is not silently published.
+apiVersion: v1
+kind: Service
+metadata:
+  name: gitops
+  namespace: platform
+  annotations:
+    description: "Bare git repo on the host - the source of truth Argo CD reads"
+spec:
+  type: ClusterIP
+  ports:
+    - name: git
+      port: 9418
+      targetPort: 9418
+      protocol: TCP
+---
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: gitops-host
+  namespace: platform
+  labels:
+    kubernetes.io/service-name: gitops
+addressType: IPv4
+ports:
+  - name: git
+    port: 9418
+    protocol: TCP
+endpoints:
+  - addresses:
+      - "${HOST_IP}"
+    conditions:
+      ready: true

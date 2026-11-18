@@ -1,0 +1,37 @@
+# The root Application: an Application whose job is to apply the other
+# Applications in this directory.
+#
+# This is the "app of apps" pattern. Without it, every new Application has to
+# be kubectl-applied by hand, which defeats the point - the set of things
+# running should itself be in git.
+#
+# It manages the directory it lives in, including itself. That is intentional
+# and supported: editing this file and committing changes the root.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root
+  namespace: argocd
+  # Do not let a stray `kubectl delete app root` cascade into deleting every
+  # child Application and everything they manage.
+  finalizers: []
+spec:
+  project: default
+  source:
+    repoURL: git://gitops.platform.svc.cluster.local:9418/gitops.git
+    targetRevision: HEAD
+    path: apps
+    directory:
+      recurse: false
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      # Pruning is off here as everywhere. Removing an Application file stops
+      # Argo CD managing it; it does not delete what it was managing. Deleting
+      # for real is a deliberate `kubectl delete app <name>`.
+      prune: false
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false

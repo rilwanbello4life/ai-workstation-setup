@@ -1,0 +1,118 @@
+# Helm values for Argo CD on a single-node, single-user cluster.
+#
+# Upstream defaults assume a shared cluster with SSO, HA Redis and a public
+# ingress. None of that applies here, and all of it costs memory that Strata
+# wants. What is left is the smallest install that still reconciles git and
+# still has a UI worth opening.
+#
+# Rendered by server/08-gitops.sh with:
+#   helm template argocd argo/argo-cd -n argocd -f argocd-values.yaml
+
+global:
+  # Every image pinned by the chart version rather than floating on :latest.
+  # An unattended Argo CD upgrade that changes CRDs is not a thing you want
+  # to discover after a reboot.
+  revisionHistoryLimit: 3
+
+# ---------------------------------------------------------------------------
+# Components removed.
+#
+# dex            SSO against an external identity provider. There is one
+#                user and they log in with a local admin password.
+# applicationSet generates Applications from git/list/cluster generators.
+#                With three Applications written by hand it is pure overhead.
+# notifications  Slack and webhook alerts on sync events. The machine is in
+#                the same room as the person who owns it.
+dex:
+  enabled: false
+notifications:
+  enabled: false
+applicationSet:
+  enabled: false
+
+# ---------------------------------------------------------------------------
+configs:
+  params:
+    # No TLS on the API server. It is reachable on loopback only, through
+    # platform-forward, exactly like LiteLLM and n8n. Terminating TLS here
+    # would mean managing a certificate for 127.0.0.1.
+    server.insecure: true
+    # How often to re-read git. The default is 180s, which is a long time to
+    # wait when you have just committed a change on the same machine.
+    timeout.reconciliation: 30s
+    # One node, one cluster, small manifests: the default 20 is wasteful.
+    controller.status.processors: 4
+    controller.operation.processors: 2
+    reposerver.parallelism.limit: 2
+
+  cm:
+    # Strata, llama.cpp and the voice server are Services with hand-written
+    # EndpointSlices and no selector. Argo CD's health check for a Service
+    # does not understand that shape, so leave their health alone.
+    resource.customizations.health.discovery.k8s.io_EndpointSlice: |
+      hs = {}
+      hs.status = "Healthy"
+      hs.message = "Hand-written endpoint slice"
+      return hs
+
+  # Argo CD refuses to manage resources it does not consider namespaced or
+  # cluster-scoped correctly. Nothing custom is needed here yet; the block is
+  # present so the next person knows where it goes.
+  clusterCredentials: {}
+
+# ---------------------------------------------------------------------------
+# Resources.
+#
+# The controller is the memory consumer: it holds a cache of every managed
+# resource. With roughly thirty objects that cache is small, but the Go heap
+# still needs room to do a full reconciliation without thrashing.
+controller:
+  replicas: 1
+  resources:
+    requests:
+      memory: 512Mi
+      cpu: 100m
+    limits:
+      memory: 1280Mi
+      cpu: "1"
+
+repoServer:
+  replicas: 1
+  resources:
+    requests:
+      memory: 256Mi
+      cpu: 50m
+    limits:
+      memory: 640Mi
+      cpu: "1"
+
+server:
+  replicas: 1
+  resources:
+    requests:
+      memory: 128Mi
+      cpu: 25m
+    limits:
+      memory: 384Mi
+      cpu: 500m
+  service:
+    type: ClusterIP
+  # No ingress. platform-forward publishes 8090 on loopback alongside the
+  # other three web UIs, and tailscale serve handles remote access.
+  ingress:
+    enabled: false
+
+redis:
+  enabled: true
+  resources:
+    requests:
+      memory: 64Mi
+      cpu: 25m
+    limits:
+      memory: 192Mi
+      cpu: 200m
+
+# High availability on one node is a contradiction. Explicitly off so an
+# upgrade cannot quietly turn it on and triple the footprint.
+redis-ha:
+  enabled: false

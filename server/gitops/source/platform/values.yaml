@@ -1,0 +1,86 @@
+# Values for the platform chart.
+#
+# These defaults reproduce what server/03-platform.sh applies today. Changing
+# one here, running `gitops commit` and watching Argo CD roll it out is the
+# whole point of the exercise.
+
+namespace: platform
+
+# The address pods use to reach services running on the host. This is the
+# cni0 gateway, and it replaces the ${HOST_IP} envsubst substitution that
+# server/02-k3s.sh used to perform before applying 03-host-models.yaml.
+#
+# Written by server/08-gitops.sh at install time. If the cluster is ever
+# rebuilt with a different pod CIDR, this is the one value to change.
+hostIP: "10.42.0.1"
+
+# Host services reached through cluster DNS. Ports match reference/ports.md.
+hostServices:
+  strata:
+    port: 8080
+    description: "Strata on the host - whichever pack is currently launched"
+  llamacpp:
+    port: 8081
+    description: "llama.cpp on the host - small model held in VRAM"
+  voice:
+    port: 8100
+    description: "Whisper + Kokoro voice server on the host"
+
+postgres:
+  image: postgres:16-alpine
+  # Tuned down from the defaults. Postgres sizes itself for a dedicated host;
+  # here it is one tenant among several and must not expand into memory the
+  # model server needs.
+  sharedBuffers: 512MB
+  effectiveCacheSize: 1536MB
+  maxConnections: 100
+  resources:
+    requests:
+      memory: 1Gi
+      cpu: 250m
+    limits:
+      memory: 2Gi
+      cpu: "2"
+
+litellm:
+  image: ghcr.io/berriai/litellm:main-stable
+  resources:
+    requests:
+      memory: 384Mi
+      cpu: 100m
+    limits:
+      memory: 1Gi
+      cpu: "2"
+  # Strata's hybrid mode holds roughly 1.5 GB of KV cache per parallel slot at
+  # 32K context, and a 16 GB card supports about two slots at that length.
+  #
+  # Note what this setting does and does not do: beyond this number LiteLLM
+  # REJECTS with a 429. It does not hold the request. Queueing is the job of
+  # the gpu-queue service in front of it, which is why this can stay low.
+  maxParallelRequests: 4
+  requestTimeout: 900
+  spendLogsRetention: "30d"
+
+n8n:
+  image: docker.n8n.io/n8nio/n8n:latest
+  timezone: Europe/Stockholm
+  # Execution history grows without bound by default and is the fastest
+  # growing table in the whole platform.
+  executionsMaxAgeHours: "336"
+  resources:
+    requests:
+      memory: 512Mi
+      cpu: 100m
+    limits:
+      memory: 1536Mi
+      cpu: "2"
+
+openWebui:
+  image: ghcr.io/open-webui/open-webui:main
+  resources:
+    requests:
+      memory: 512Mi
+      cpu: 100m
+    limits:
+      memory: 1536Mi
+      cpu: "2"

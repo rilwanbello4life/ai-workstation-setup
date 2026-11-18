@@ -1,0 +1,117 @@
+{{- /*
+n8n: the automation platform, and where the agent topology actually lives.
+
+Backed by Postgres rather than its default SQLite. SQLite is fine for a
+laptop trial and a liability here: workflow history, credentials and
+execution state in one file with no concurrent access story.
+
+n8n reaches models through the gateway, never directly, so every workflow
+call is keyed, budgeted and logged like any other client.
+*/}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: n8n
+  namespace: {{ .Values.namespace }}
+spec:
+  selector:
+    app: n8n
+  ports:
+    - port: 5678
+      targetPort: 5678
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: n8n
+  namespace: {{ .Values.namespace }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: n8n
+  template:
+    metadata:
+      labels:
+        app: n8n
+    spec:
+      securityContext:
+        fsGroup: 1000
+      containers:
+        - name: n8n
+          image: {{ .Values.n8n.image }}
+          ports:
+            - containerPort: 5678
+          env:
+            - name: DB_TYPE
+              value: postgresdb
+            - name: DB_POSTGRESDB_HOST
+              value: postgres
+            - name: DB_POSTGRESDB_DATABASE
+              value: n8n
+            - name: DB_POSTGRESDB_USER
+              value: n8n
+            - name: DB_POSTGRESDB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: n8n-credentials
+                  key: db-password
+            # Encrypts stored credentials. Losing this key means every saved
+            # credential in every workflow becomes unreadable, which is why
+            # 03-platform.sh persists it to /srv and never regenerates it.
+            - name: N8N_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: n8n-credentials
+                  key: encryption-key
+            - name: N8N_HOST
+              value: "127.0.0.1"
+            - name: N8N_PORT
+              value: "5678"
+            - name: N8N_PROTOCOL
+              value: http
+            - name: WEBHOOK_URL
+              value: "http://127.0.0.1:5678/"
+            - name: EXECUTIONS_DATA_PRUNE
+              value: "true"
+            - name: EXECUTIONS_DATA_MAX_AGE
+              value: {{ .Values.n8n.executionsMaxAgeHours | quote }}
+            - name: EXECUTIONS_DATA_SAVE_ON_SUCCESS
+              value: "none"          # only keep failures; successes are noise
+            - name: EXECUTIONS_DATA_SAVE_ON_ERROR
+              value: "all"
+            # Required for the meta-automation pattern: workflows that read
+            # and write other workflows through n8n's own REST API.
+            - name: N8N_PUBLIC_API_DISABLED
+              value: "false"
+            - name: GENERIC_TIMEZONE
+              value: {{ .Values.n8n.timezone | quote }}
+            - name: N8N_DIAGNOSTICS_ENABLED
+              value: "false"
+            # Lets Code nodes require the Postgres client, used by the agent
+            # workflows to read and write the prompt store directly.
+            - name: NODE_FUNCTION_ALLOW_EXTERNAL
+              value: "pg"
+          resources:
+{{ toYaml .Values.n8n.resources | indent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /home/node/.n8n
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 5678
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 5678
+            initialDelaySeconds: 120
+            periodSeconds: 30
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: n8n-data
