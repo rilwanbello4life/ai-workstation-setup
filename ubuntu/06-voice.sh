@@ -67,6 +67,7 @@ After=network.target
 Type=simple
 ExecStart=$PY $APP/server.py --host 127.0.0.1 --port 8100
 Environment=HF_HOME=$AI_ROOT/hf-cache
+Environment=AI_ROOT=$AI_ROOT
 Restart=on-failure
 RestartSec=5
 
@@ -78,8 +79,10 @@ ok "Unit written: $unit_dir/voice-server.service"
 
 cat <<EOF
 
-  Models download on first request, not now, so the first call is slow and
-  every later one is instant.
+  If models/download-models.sh has already fetched the voice group, Whisper
+  loads from $AI_ROOT/voice/whisper and the first call is fast. Otherwise it
+  downloads on first request, so that one call is slow and the rest instant:
+      ./models/download-models.sh voice
 
   Run it in the foreground:
       $launcher

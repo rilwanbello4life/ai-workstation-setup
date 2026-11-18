@@ -40,6 +40,16 @@ These run as pods, except the GPU probe and the git daemon, which are host syste
 
 **4100 and 4000 do the same job differently.** Both speak the OpenAI API and both accept the same keys. The difference is what happens when the GPU is busy: LiteLLM returns `429` once `max_parallel_requests` is reached, while the queue holds the request and admits it when there is room. Send shared traffic to 4100 and keep 4000 for your own local tools, where a refusal is easier to notice than a wait. See [gpu-queue.md](gpu-queue.md).
 
+### Reserved, not yet built
+
+| Service | Port | Phase |
+|---|---|---|
+| **MCP gateway** | 4200 | 22 — Gmail, Drive and Calendar as agent tools |
+| **Dictation router** | 4300 | 23 — speech in, dispatched action out |
+| **Dashboard** | 4400 | 25 — Grafana over the whole platform |
+
+Nothing listens on these yet. They are written down so that a later phase does not pick one by accident, and because the 4xxx block keeps platform services together. [roadmap.md](roadmap.md) specifies all three.
+
 ### Game servers — Ubuntu only, Tailscale-reachable
 
 | Service | Port | Protocol |

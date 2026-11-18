@@ -105,10 +105,15 @@ fi
 
 cat <<EOF
 
-  Models go in $AI_ROOT/gguf/.
+  This installs the server but no weights. Fetch the default chat model:
+      ./models/download-models.sh text
+
+  That puts Qwen2.5-14B-Instruct-Q4_K_M.gguf in $AI_ROOT/gguf/, which is what
+  LiteLLM's 'local' and 'checker' aliases expect. Any other GGUF goes in the
+  same directory.
 
   Serve one with:
-      $launcher my-model.gguf
+      $launcher Qwen2.5-14B-Instruct-Q4_K_M.gguf
 
   Then point Pi, Cursor or any OpenAI client at:
       http://127.0.0.1:8081/v1

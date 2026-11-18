@@ -14,7 +14,7 @@
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('image', 'video', 'voice', 'all')]
+    [ValidateSet('image', 'video', 'voice', 'text', 'all')]
     [string]$Group = 'image',
 
     [string]$AiRoot = $(if ($env:AI_ROOT) { $env:AI_ROOT } else { 'C:\AI' })

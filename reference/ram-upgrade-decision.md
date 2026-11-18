@@ -230,7 +230,9 @@ Two mitigations cost nothing:
 
 ## What to download
 
-The full catalogue is ~677 GB and fits on the 2 TB drive as budgeted, so install all of it regardless of which memory configuration you land on. Having every pack resident is what makes switching modes a one-liner rather than a 76 GB wait.
+`--tier all` is ~788 GB: tiers A-E at 677 GB, plus UD-IQ4_XS at 111 GB as tier F. Install all of it regardless of which memory configuration you land on — packs are fetched once, and having every one resident is what makes switching modes a one-liner rather than a 76 GB wait.
+
+Tier F only *loads* in the 96 GB configuration. Downloading it on 64 GB, or before the DIMMs are fitted, is fine and the installer says so; it simply sits on disk until the memory is there. Use `--tier abcde` to leave it out and keep the Steam library at 542 GB rather than 431 GB.
 
 ```bash
 cd ai-workstation-setup/ubuntu
@@ -262,15 +264,15 @@ IQ3_S matches the full model on the published tests and is the slowest of the li
 
 ### Beyond tier E — only at 96 GB
 
-Not in the tier letters because the scripts were written when they were unreachable. Fetch them by hand once the memory configuration is proven.
+UD-IQ4_XS is tier F and comes with `--tier all`. The other two are not in the tier letters, and fetching them is a deliberate manual step once the memory configuration is proven.
 
 | Pack | Experts | Download | When |
 |---|---:|---:|---|
-| Unsloth UD-IQ4_XS | ~62 GB | ~111 GB | cluster up, 6 GB margin — measure before trusting |
-| NVFP4 | ~70 GB | — | after `ai-pause`; the FP4 tensor cores finally earn their keep |
-| Unsloth UD-Q4_K_XL | ~78 GB | ~130 GB | after `ai-pause`, 5 GB margin |
+| Unsloth UD-IQ4_XS | ~62 GB | ~111 GB | **tier F, in `--tier all`.** Cluster up, 6 GB margin — measure before trusting |
+| NVFP4 | ~70 GB | — | by hand, after `ai-pause`; the FP4 tensor cores finally earn their keep |
+| Unsloth UD-Q4_K_XL | ~78 GB | ~130 GB | by hand, after `ai-pause`, 5 GB margin |
 
-**Disk becomes the constraint here, not memory.** The budgeted 677 GB catalogue plus any two of these overruns what [partition-layout.md](partition-layout.md) leaves for Steam. Pick one, or see [4tb-upgrade.md](4tb-upgrade.md).
+**Disk becomes the constraint here, not memory.** Tiers A-F are 788 GB, and adding either remaining pack on top overruns what [partition-layout.md](partition-layout.md) leaves for Steam. Take one only if you have decided what it displaces, or see [4tb-upgrade.md](4tb-upgrade.md).
 
 ## What neither configuration reaches
 

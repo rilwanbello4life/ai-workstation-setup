@@ -2,7 +2,7 @@
 # Download models listed in manifest.tsv into the local AI root.
 #
 # Usage:
-#   ./download-models.sh [image|video|voice|all] [ai-root]
+#   ./download-models.sh [image|video|voice|text|all] [ai-root]
 #
 # Defaults to "image" and ~/ai. Already-present files are skipped, so
 # re-running is cheap and safe.

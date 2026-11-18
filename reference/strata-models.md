@@ -117,17 +117,21 @@ Which tier it belongs to depends entirely on how the memory was fitted. **At 64 
 
 ## Tier F — only at 96 GB
 
-These sit outside the tier letters the scripts understand, because they were unreachable when those were written. Fetch them by hand once the four-DIMM configuration has passed `memtest86+`.
+**UD-IQ4_XS is now tier F in the scripts** and is included in `./07-strata.sh --tier all`. It is the best pack this configuration holds with the cluster still running, so it earns a place in the default install rather than being a manual afterthought. It costs about 111 GB, taking the Steam allocation from roughly 542 GB down to 431 GB — see [partition-layout.md](partition-layout.md).
+
+The other two stay outside the tier letters on purpose, and are fetched by hand once the four-DIMM configuration has passed `memtest86+`:
 
 | Pack | Experts | Download | When |
 |---|---:|---:|---|
-| **Unsloth UD-IQ4_XS** | ~62 GB | ~111 GB | cluster up, against ~68 GB available — a 6 GB margin, so measure before relying on it |
-| **NVFP4** (all three) | ~70 GB | — | after `ai-pause`. Your RTX 5070 Ti has FP4 tensor cores built for exactly these |
-| **Unsloth UD-Q4_K_XL** | ~78 GB | ~130 GB | after `ai-pause`, against ~83 GB — a 5 GB margin |
+| **Unsloth UD-IQ4_XS** | ~62 GB | ~111 GB | **tier F, in `--tier all`.** Cluster up, against ~68 GB available — a 6 GB margin, so measure before relying on it |
+| **NVFP4** (all three) | ~70 GB | — | by hand, after `ai-pause`. Your RTX 5070 Ti has FP4 tensor cores built for exactly these |
+| **Unsloth UD-Q4_K_XL** | ~78 GB | ~130 GB | by hand, after `ai-pause`, against ~83 GB — a 5 GB margin |
 
-Both margins come from approximate published figures, so treat the top two rows as worth attempting rather than guaranteed.
+Both margins come from approximate published figures, so treat them as worth attempting rather than guaranteed.
 
-**Disk, not memory, is the constraint up here.** The budgeted 677 GB catalogue plus any two of these overruns what [partition-layout.md](partition-layout.md) leaves for a Steam library. Pick one, or see [4tb-upgrade.md](4tb-upgrade.md).
+The reason NVFP4 and UD-Q4_K_XL are excluded from `--tier all` is not caution about memory — it is disk. Tier F plus either one overruns the Steam allocation entirely, and NVFP4 publishes no download size, so the installer has no figure to check against its disk guard.
+
+**Disk, not memory, is the constraint up here.** Tiers A-F are 788 GB. Adding either remaining pack to that overruns what [partition-layout.md](partition-layout.md) leaves for a Steam library. Take one only if you have decided what it displaces, or see [4tb-upgrade.md](4tb-upgrade.md).
 
 ## Still out of reach
 
@@ -208,15 +212,16 @@ Launching a different model while one serves prompts *"Restart the model with th
 | Tier A + B | ~275 GB |
 | Tier A + B + C | ~417 GB |
 | Everything through Tier E (post-upgrade) | ~677 GB |
+| Everything through Tier F — `--tier all` | ~788 GB |
 
 Two consequences:
 
-- **Ubuntu (2 TB)** takes the **entire catalogue through tier E — all 677 GB**. Do the full install here. After the OS, the cluster, game-server worlds, the local backups and a 186 GB free-space reserve, that still leaves roughly 542 GB for a Steam library. The AI side was given priority deliberately; gaming absorbs the difference.
+- **Ubuntu (2 TB)** takes the **entire catalogue through tier F — all 788 GB**, which is what `--tier all` now installs. After the OS, the cluster, game-server worlds, the local backups and a 186 GB free-space reserve, that leaves roughly 431 GB for a Steam library. Stopping at tier E keeps the Steam figure at 542 GB. The AI side was given priority deliberately; gaming absorbs the difference.
 - **Windows (1 TB)** cannot hold much at all. Windows and applications take ~80 GB and the rest of the AI stack another ~108 GB. Install **Coder and Qwen3.6 UD-Q4_K_XL only** there — about 91 GB, leaving roughly 650 GB for games — and keep the rest on Ubuntu.
 
-Worth being clear about what the full install buys, since memory rather than disk decides what you can actually run. With the server platform up, the ceiling is IQ2_XS at 64 GB and UD-IQ4_XS at 96 GB; anything above that needs `ai-pause --cluster` first. Having every pack already on disk is what makes switching between those modes a one-liner instead of a 76 GB download, which is the whole argument for spending the 677 GB.
+Worth being clear about what the full install buys, since memory rather than disk decides what you can actually run. With the server platform up, the ceiling is IQ2_XS at 64 GB and UD-IQ4_XS at 96 GB; anything above that needs `ai-pause --cluster` first. Having every pack already on disk is what makes switching between those modes a one-liner instead of a 76 GB download, which is the whole argument for spending the 788 GB.
 
-The tier F packs are deliberately **not** in that 677 GB. At 96 GB you can run them but you cannot hold all of them — budget roughly 111 GB for UD-IQ4_XS or 130 GB for UD-Q4_K_XL against the Steam library, and pick one.
+Of the three 96 GB packs only UD-IQ4_XS is in that 788 GB. You can run the other two at 96 GB but you cannot hold them all — budget a further 130 GB for UD-Q4_K_XL against the Steam library, and take it only if you have decided what it displaces.
 
 The one model that does not fit cleanly at any memory tier is **DeepSeek V4.1-Flash** at 257 GB — and disk is the lesser of its two problems, since it measures about 5 tok/s on this card. It is itemised with the rest of the trade-offs in [4tb-upgrade.md](4tb-upgrade.md).
 

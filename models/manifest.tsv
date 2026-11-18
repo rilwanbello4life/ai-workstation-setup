@@ -15,3 +15,6 @@ video	Comfy-Org/Wan_2.2_ComfyUI_Repackaged	split_files/text_encoders/umt5_xxl_fp
 video	Comfy-Org/Wan_2.2_ComfyUI_Repackaged	split_files/vae/wan2.2_vae.safetensors	comfyui/models/vae
 
 voice	hexgrad/Kokoro-82M	*	voice/kokoro
+voice	deepdml/faster-whisper-large-v3-turbo-ct2	*	voice/whisper
+
+text	bartowski/Qwen2.5-14B-Instruct-GGUF	Qwen2.5-14B-Instruct-Q4_K_M.gguf	gguf

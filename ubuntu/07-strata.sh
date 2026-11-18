@@ -19,10 +19,16 @@
 #   C  SSD-streamed, slow   Flash-Next Q2_0, IQ2_XS               ~142 GB
 #   D  needs 64 GB RAM      Q2_0, IQ2_XS, IQ3_XXS, Swift, Q8_0    ~326 GB
 #   E  needs 64 GB, tight   IQ3_S                                  ~76 GB
+#   F  needs 96 GB          UD-IQ4_XS                             ~111 GB
 #
-# UD-IQ4_XS, NVFP4 and UD-Q4_K_XL need 96 GB and have no tier letter, because
-# they were unreachable when these were written. Fetch them by hand; the
-# thresholds below say so when the machine has the memory for it.
+# Tier F exists only in the 96 GB "add" configuration from phase 11. It is in
+# the table rather than fetched by hand because at 96 GB it is the best pack
+# that still loads with the cluster running.
+#
+# NVFP4 and UD-Q4_K_XL stay out of the tier system deliberately. Taking both
+# F-class packs overruns the drive, and NVFP4 publishes no download size to
+# guard against - so these two remain a manual, deliberate choice. See
+# reference/strata-models.md.
 #
 # Prints a plan and changes nothing unless you pass --install.
 #
@@ -45,10 +51,11 @@ Usage:
   ./07-strata.sh --tier ab            plan tiers A and B
   ./07-strata.sh --tier a --install   download and install tier A
   ./07-strata.sh --tier de --install  after the phase 11 memory upgrade
+  ./07-strata.sh --tier f --install   the 96 GB pack, on four DIMMs only
   ./07-strata.sh --tier all --install everything this machine allows
 
 Options:
-  --tier LETTERS   any combination of a b c d e, or "all"  (default: a)
+  --tier LETTERS   any combination of a b c d e f, or "all"  (default: a)
   --install        actually download, instead of printing the plan
   -y, --yes        do not ask before each model
 
@@ -65,9 +72,9 @@ while (( $# )); do
     esac
 done
 TIERS="$(tr '[:upper:]' '[:lower:]' <<<"$TIERS")"
-if [[ "$TIERS" == "all" ]]; then TIERS="abcde"; fi
+if [[ "$TIERS" == "all" ]]; then TIERS="abcdef"; fi
 # Without this, --tier bogus silently matches tier B.
-[[ "$TIERS" =~ ^[abcde]+$ ]] || die "Tier must be letters a-e, or 'all'. Got: $TIERS"
+[[ "$TIERS" =~ ^[abcdef]+$ ]] || die "Tier must be letters a-f, or 'all'. Got: $TIERS"
 
 # A model's tier field may hold several letters - Q2_0 and IQ2_XS are both
 # "usable now but SSD-bound" (C) and "first-class after the upgrade" (D).
@@ -144,6 +151,7 @@ MODELS=(
     "swift|IQ2_XS|d|72|Swift 1.5 - IQ2_XS quality, much shorter thinking"
     "qwen36|Q8_0|d|38|Qwen3.6 8-bit - closest to the full 35B"
     "qwen|iq3_s|e|76|Flash-Next IQ3_S - 50 GB of experts, 53 tok/s"
+    "qwen|UD-IQ4_XS|f|111|Unsloth UD-IQ4_XS - 62 GB of experts, 96 GB only"
 )
 
 selected=()
@@ -175,6 +183,17 @@ if (( total + 6 > spendable_gb )); then
     # In plan mode this is advice. In install mode it is a wall, because the
     # failure arrives 600 GB into a download rather than here.
     [[ "$DO_INSTALL" == yes ]] && die "Refusing to start a download that cannot finish."
+fi
+
+# Tier F needs the 96 GB configuration. Downloading it on less is legitimate
+# - packs are fetched once and the memory upgrade is phase 11 - but it should
+# be a choice rather than a surprise, because it is 111 GB that cannot load
+# until the DIMMs are in. This warns and continues; it does not block, since
+# pre-downloading before the RAM arrives is the normal reason to be here.
+if [[ "$TIERS" == *f* ]] && (( ram_gb < 90 )); then
+    warn "Tier F (UD-IQ4_XS, ~111 GB) needs ~96 GB of RAM; this machine reports ${ram_gb} GB."
+    warn "It will download and install, but cannot load until phase 11 is fitted."
+    warn "Use --tier abcde to leave it out."
 fi
 
 # ---------------------------------------------------------------------------
@@ -216,8 +235,11 @@ elif (( ram_gb < 90 )); then
   modules at the full DDR5-6000. You trade the top of the catalogue for about
   a fifth more memory bandwidth than the four-DIMM alternative.
 
-  The full catalogue is ~677 GB and is budgeted for on this drive - install
-  it. Memory, not disk, is what decides which of them you can run: IQ2_XS is
+  Tiers A-E are ~677 GB and budgeted for on this drive - install them with
+  '--tier abcde'. Tier F needs 96 GB and will not load in this configuration,
+  so '--tier all' would spend 111 GB on a pack you cannot use yet.
+
+  Memory, not disk, is what decides which of them you can run: IQ2_XS is
   the largest that works with the cluster up, and the rest need
   'ai-pause --cluster' first. Having them all resident is what makes
   switching modes a relaunch instead of a 76 GB download.
@@ -238,15 +260,23 @@ else
   ranks are the least forgiving thing AM5 does, and marginal memory corrupts
   data quietly rather than failing visibly.
 
-  The full catalogue is ~677 GB and is budgeted for on this drive - install
-  it all. Then, by hand, one of the packs that only this tier reaches:
+  Tiers A-E are ~677 GB and budgeted for on this drive. Tier F adds the one
+  pack that only this memory configuration reaches:
 
     UD-IQ4_XS   ~62 GB experts, ~111 GB download  - cluster up, 6 GB margin
+
+  '--tier all' now means A-F, ~788 GB, which leaves roughly 431 GB for the
+  Steam library instead of 542 GB. That trade is the reason it is called out
+  here rather than buried in the total.
+
+  Two more packs reach this tier and are deliberately not in '--tier all':
+
     NVFP4       ~70 GB experts                    - after 'ai-pause'
     UD-Q4_K_XL  ~78 GB experts, ~130 GB download  - after 'ai-pause'
 
-  Disk, not memory, is the constraint up there: the catalogue plus any two of
-  them overruns what the Steam library was budgeted. Pick one.
+  Disk, not memory, is the constraint up here: A-F plus either of those
+  overruns the Steam allocation entirely. Take one only if you have decided
+  what it displaces, or see reference/4tb-upgrade.md.
 
   Still out of reach: Qwen3.6 Q8_0 class at ~136 GB. DeepSeek V4.1-Flash fits
   in memory but measures ~5 tok/s on this card and wants 257 GB of disk.

@@ -62,6 +62,25 @@ config = argparse.Namespace(
 )
 
 
+def resolve_whisper_model():
+    """Prefer a pre-downloaded model directory over the bare model name.
+
+    A bare name like "large-v3-turbo" makes faster-whisper fetch from Hugging
+    Face on first request, which means the first transcription of a fresh
+    install stalls for minutes and fails outright with no network. models/
+    download-models.sh puts a CTranslate2 copy in $AI_ROOT/voice/whisper, so
+    use that when it is there and fall back to the name when it is not.
+    """
+    if os.path.sep in config.whisper_model or os.path.isdir(config.whisper_model):
+        return config.whisper_model
+
+    ai_root = os.environ.get("AI_ROOT") or os.path.expanduser("~/ai")
+    local = os.path.join(ai_root, "voice", "whisper")
+    if os.path.isfile(os.path.join(local, "model.bin")):
+        return local
+    return config.whisper_model
+
+
 def get_whisper():
     """Load faster-whisper on first use, falling back to CPU if CUDA is absent."""
     global _whisper
@@ -74,15 +93,16 @@ def get_whisper():
 
         from faster_whisper import WhisperModel
 
+        model_ref = resolve_whisper_model()
         device = config.whisper_device
         compute_type = config.whisper_compute_type
         try:
-            log.info("Loading Whisper %s on %s (%s)", config.whisper_model, device, compute_type)
-            _whisper = WhisperModel(config.whisper_model, device=device, compute_type=compute_type)
+            log.info("Loading Whisper %s on %s (%s)", model_ref, device, compute_type)
+            _whisper = WhisperModel(model_ref, device=device, compute_type=compute_type)
         except Exception as exc:  # noqa: BLE001 - any CUDA/driver failure should degrade, not crash
             if device == "cuda":
                 log.warning("CUDA load failed (%s); falling back to CPU int8", exc)
-                _whisper = WhisperModel(config.whisper_model, device="cpu", compute_type="int8")
+                _whisper = WhisperModel(model_ref, device="cpu", compute_type="int8")
             else:
                 raise
         log.info("Whisper ready")

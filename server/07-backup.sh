@@ -18,7 +18,7 @@
 #           failure, fire, theft and ransomware. The data worth keeping is
 #           small - megabytes to a few GB - so this costs about 50 kr/month.
 #
-# Models are deliberately NOT backed up. They are 677 GB and re-downloadable.
+# Models are deliberately NOT backed up. They are 788 GB and re-downloadable.
 #
 # Offsite is optional: with no provider configured the script still runs and
 # keeps local snapshots, so it is useful on day one. Configure offsite later
@@ -52,7 +52,7 @@ cat <<EOF
       Game worlds       $GAMES_DIR
       Manifests         the k8s/ directory, so a rebuild needs no git access
 
-  Not backed up: model files (677 GB, re-downloadable) and container images.
+  Not backed up: model files (788 GB, re-downloadable) and container images.
 EOF
 
 # ---------------------------------------------------------------------------

@@ -94,6 +94,7 @@ ai-workstation-setup/
     ├── remote-access.md         Reaching the models from a phone or laptop
     ├── strata-models.md         Full model catalogue, 64 GB and 96 GB tiers
     ├── ram-upgrade-decision.md  Phase 11: add or swap, and what each costs
+    ├── roadmap.md               Phases 22-25: MCP, dictation, authoring, dashboard
     ├── 4tb-upgrade.md           What a bigger drive buys, and the cherry-pick list
     └── troubleshooting.md       Symptom-indexed fixes
 ```
@@ -133,6 +134,8 @@ Phases 12 onward turn the Ubuntu side into the always-on server. They are indepe
 | 19 | Gaming on Ubuntu *(optional)* | Linux | [ubuntu/09-gaming.sh](ubuntu/09-gaming.sh) |
 | 20 | GitOps: Argo CD watching a local repo *(optional)* | Linux | [server/08-gitops.sh](server/08-gitops.sh) |
 | 21 | GPU queue: fair sharing and per-person profiles *(optional)* | Linux | [server/09-gpu-queue.sh](server/09-gpu-queue.sh) |
+
+**Phases 22 to 25 are specified but not built**: an MCP gateway putting Gmail, Drive and Calendar in reach of the agents, a dictation front door that decides what to do with what you said, an agent that writes n8n workflows, and a dashboard over all of it. [reference/roadmap.md](reference/roadmap.md) gives each one its files, its port and the decisions already taken, so building them is implementation rather than design. Nothing in phases 1 to 21 depends on them.
 
 Most scripted phases have a manual equivalent — Windows phases 1, 2, 4, 5, 6 and 10 in [reference/manual-windows.md](reference/manual-windows.md), phase 8 in [reference/manual-ubuntu.md](reference/manual-ubuntu.md), and phases 12–18 in [reference/manual-server.md](reference/manual-server.md). Phases 20 and 21 do not have one; they are documented by behaviour instead, in [reference/gitops.md](reference/gitops.md) and [reference/gpu-queue.md](reference/gpu-queue.md).
 
@@ -202,7 +205,7 @@ The five recommendations you collected are one stack, not five alternatives.
 
 Both systems get the full stack — text, image, video and voice — so this is preference rather than necessity:
 
-- **Ubuntu** is the better AI side, and the only server side. Native ext4, no desktop compositor to shed, `ai-console-mode` to reclaim VRAM, and room for the **entire Strata catalogue** plus the cluster and backups, with about 542 GB left for games. With phase 19 it is also a capable gaming machine — subject to one hard limit, covered in [reference/linux-gaming.md](reference/linux-gaming.md): kernel-level anti-cheat titles do not run on Linux at all, and no configuration changes that.
+- **Ubuntu** is the better AI side, and the only server side. Native ext4, no desktop compositor to shed, `ai-console-mode` to reclaim VRAM, and room for the **entire Strata catalogue** plus the cluster and backups, with about 431 GB left for games. With phase 19 it is also a capable gaming machine — subject to one hard limit, covered in [reference/linux-gaming.md](reference/linux-gaming.md): kernel-level anti-cheat titles do not run on Linux at all, and no configuration changes that.
 - **Windows** is full AI *plus* gaming. After Windows and the full stack there is roughly 690 GB left for games, which is four to six modern titles. That is the only thing the Windows side is short on, and a larger drive later fixes it.
 
 If space pinches before that upgrade, **drop the ComfyUI video models from Windows first** — 55 GB back, and Wan 2.2 is the slowest thing on a 16 GB card anyway. [windows/03-tune-windows.ps1](windows/03-tune-windows.ps1) reports the budget against your actual free space.

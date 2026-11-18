@@ -1,8 +1,8 @@
-# Model manifest — 16 GB VRAM / 32 GB RAM
+# Model manifest — 16 GB VRAM, 32 GB RAM now and 96 GB after phase 11
 
 Every path below is relative to the AI root on whichever system you are on: `C:\AI` on Windows, `~/ai` on Ubuntu. The two systems share nothing, so **run the download on each OS separately**.
 
-Download with [`download-models.ps1`](download-models.ps1) (Windows) or [`download-models.sh`](download-models.sh) (Linux). Both take a group name: `image`, `video`, `voice`, or `all`.
+Download with [`download-models.ps1`](download-models.ps1) (Windows) or [`download-models.sh`](download-models.sh) (Linux). Both take a group name: `image`, `video`, `voice`, `text`, or `all`. Everything in the tables below that is marked *verified* is in [`manifest.tsv`](manifest.tsv) and arrives with `all`; entries marked *verify* or listed as optional are deliberately left for you to fetch by hand.
 
 **Verification status** is marked on each entry. Entries marked *verify* are correct in shape but the exact repository may have been renamed — use ComfyUI Manager's model browser or `hf search` to confirm before downloading rather than trusting the string blindly.
 
@@ -10,8 +10,14 @@ Download with [`download-models.ps1`](download-models.ps1) (Windows) or [`downlo
 
 Handled outside this manifest:
 
-- **Strata model packs** — fetched by Strata itself, never manually. On 32 GB that is Flash-Next Coder (~68 GB), Qwen3.6-35B-A3B UD-Q4_K_XL (~23 GB) and Gyro-S (~59 GB); Windows gets the first two only. Install with `ubuntu/07-strata.sh` or `strata launch --family <f> --model <m>`, and see [strata-models.md](../reference/strata-models.md) for the full catalogue and what each memory tier adds.
-- **Fast everyday chat model** — a 12–14B dense model at Q4_K_M, roughly 9 GB, which sits entirely in VRAM and answers instantly. Pick this through LM Studio's built-in model browser, which only lists GGUFs it has verified against the current runtime. Set LM Studio's models directory to `C:\AI\gguf` first.
+- **Strata model packs** — fetched by Strata itself, never manually, and sized by RAM rather than by this manifest. On the factory 32 GB that is tier A: Flash-Next Coder (~68 GB), Qwen3.6-35B-A3B UD-Q4_K_XL (~23 GB) and Gyro-S (~59 GB), with Windows taking the first two only. After the phase 11 upgrade to 96 GB, `./07-strata.sh --tier all --install` fetches tiers A-F, about 788 GB.
+
+  Packs are downloaded once and kept, so there is no harm in fetching the larger tiers before the DIMMs arrive — they simply sit on disk until the memory is there, and the installer warns rather than refuses. See [strata-models.md](../reference/strata-models.md) for the catalogue and what each memory tier unlocks.
+- **Fast everyday chat model** *(verified)* — `bartowski/Qwen2.5-14B-Instruct-GGUF` → `Qwen2.5-14B-Instruct-Q4_K_M.gguf`, roughly 9 GB, which sits entirely in 16 GB of VRAM and answers instantly. This is the `text` group, so `download-models.sh text` or `all` fetches it into `gguf/`.
+
+  It is not an optional extra on Ubuntu: `ubuntu/04-llamacpp.sh` installs the server but ships no weights, and LiteLLM's `local` and `checker` aliases both point at it, so without a GGUF in `gguf/` those two routes answer nothing. Serve it with `start-llama-server.sh Qwen2.5-14B-Instruct-Q4_K_M.gguf`.
+
+  On Windows you can equally pick one through LM Studio's model browser, which only lists GGUFs it has verified against the current runtime — point LM Studio's models directory at `C:\AI\gguf` so both tools share the same files.
 
 Rule of thumb for what fits: at Q4_K_M a dense model needs about `parameters × 0.6 GB`. With 16 GB of VRAM, stay at or under 14B if you want the whole model resident with room for context.
 
@@ -71,9 +77,11 @@ Image-to-video generally beats text-to-video for control: generate a still with 
 
 ## Voice
 
-### Speech to text — faster-whisper
+### Speech to text — faster-whisper *(verified)*
 
-No manual download needed. `faster-whisper` resolves and caches the model on first use:
+`deepdml/faster-whisper-large-v3-turbo-ct2`, a CTranslate2 build of large-v3-turbo, fetched as a whole repository into `voice/whisper/` by the `voice` group.
+
+`faster-whisper` will also resolve the model by name and cache it on first use, so this download is not strictly required — but the first transcription on a fresh install then stalls for minutes while it pulls, and fails outright with no network. `voice/server.py` prefers `$AI_ROOT/voice/whisper` when it finds a `model.bin` there and falls back to the bare name otherwise, so pre-downloading simply makes the first request fast:
 
 ```python
 from faster_whisper import WhisperModel
@@ -106,6 +114,6 @@ Avoid XTTS-v2 and F5-TTS unless the project is non-commercial — both have lice
 
 Strata is the reason the two columns differ. It serves one model at a time, so installing several is purely a disk question — Ubuntu's 2 TB takes the full catalogue, while Windows takes Coder and Qwen3.6 only.
 
-On **Ubuntu** that lands against roughly 3.7 TB of usable space, so you can be relaxed about keeping multiple variants, the full ~677 GB Strata catalogue, the cluster's container images and a shelf of game servers all at once.
+On **Ubuntu** that lands against roughly 1 863 GiB of usable space on the 2 TB drive. The 788 GB Strata catalogue, these ComfyUI and voice models, the cluster's container images, the game-server worlds and the local backups come to about 1 246 GB, which leaves roughly 431 GB for a Steam library after a 186 GB free-space reserve. [partition-layout.md](../reference/partition-layout.md) has the full arithmetic.
 
 On **Windows** it is tighter: Windows and applications take ~80 GB of the 1 TB drive, leaving about 650 GB for games once the stack is in. If you want more room for games, skip the `video` group on Windows — that is 38 GB of the table above, and Wan 2.2 is the slowest thing on a 16 GB card anyway. Run it on Ubuntu instead.

@@ -59,7 +59,7 @@ Containerising Strata on a single node buys you nothing and costs you several th
 - It needs `--ulimit memlock=-1` and privileged access to pin 25–30 GB
 - It needs the whole GPU, so the device plugin gives it a permanent claim and nothing else can ever schedule against the card
 - A pod restart means a 1–3 minute reload during which everything that depends on it fails
-- The model files are 677 GB on the host filesystem; mounting them in is pure indirection
+- The model files are 788 GB on the host filesystem; mounting them in is pure indirection
 
 Pods reach the host services through a Service with manually defined Endpoints pointing at the host's cluster IP. That is covered in [kubernetes.md](kubernetes.md).
 
@@ -187,7 +187,7 @@ The cluster is reproducible from the manifests in [`../server/k8s/`](../server/k
 - **n8n workflows** — exported as JSON alongside, so they survive a Postgres loss
 - **Secrets** — `/srv/platform/secrets`, the smallest and least replaceable thing here
 - **Game worlds** — `/srv/games`, with Minecraft writes flushed and held during the copy
-- **Model files** — not backed up. They are 677 GB and re-downloadable.
+- **Model files** — not backed up. They are 788 GB and re-downloadable.
 
 Two layers, because they fail differently. `/srv/backups` is on the same drive and protects against mistakes; an encrypted restic repository offsite protects against the drive, the building and ransomware. Everything irreplaceable here totals a few GB, so offsite runs about 50 kr a month.
 
