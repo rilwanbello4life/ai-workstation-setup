@@ -1,8 +1,8 @@
-# Roadmap — phases 22 to 25
+# Roadmap — phases 22 to 26
 
-Phases 1 to 21 are built and documented. This file specifies the four that are not, in enough detail that building them is implementation rather than design: the files to create, the ports to bind, the decisions already taken and the reasons behind them.
+Phases 1 to 21 are built and documented. This file specifies the five that are not, in enough detail that building them is implementation rather than design: the files to create, the ports to bind, the decisions already taken and the reasons behind them.
 
-The four come from one request — *"an orchestration of AI for anything I want to do, an MCP server connecting my Gmail and Drive, a model that writes workflows for me, something I can dictate to, and a dashboard over all of it"* — split into the smallest pieces that each stand alone and each leave the stack working.
+The first four come from one request — *"an orchestration of AI for anything I want to do, an MCP server connecting my Gmail and Drive, a model that writes workflows for me, something I can dictate to, and a dashboard over all of it"* — split into the smallest pieces that each stand alone and each leave the stack working.
 
 | Phase | What | New files | Port |
 |---|---|---|---|
@@ -10,6 +10,7 @@ The four come from one request — *"an orchestration of AI for anything I want 
 | 23 | Dictation front door — speak at the system, it decides what to do | `server/11-dictation.sh`, `server/dictation/router.py` | 4300 |
 | 24 | Workflow author — an agent that writes n8n workflows | extends `server/04-agents.sh` | — |
 | 25 | Dashboard — one page showing everything above | `server/12-dashboard.sh`, `server/k8s/15-dashboard.yaml` | 4400 |
+| 26 | Medic — an agent that diagnoses this machine, read-only | `server/13-medic.sh` | — |
 
 Ports 4200, 4300 and 4400 are reserved in [ports.md](ports.md) so nothing else takes them in the meantime. They continue the 4xxx platform-service block that LiteLLM (4000) and the GPU queue (4100) started.
 
@@ -105,10 +106,30 @@ Loopback-bound like everything else, published to your own devices with `tailsca
 
 **Last deliberately.** It visualises phases 21 through 24, so building it earlier means building it twice.
 
+## Phase 26 — the medic
+
+**Goal.** Ask the machine what is wrong with it and get a useful answer, instead of reading `journalctl` at midnight.
+
+**Why it is nearly free.** [`status.sh`](../status.sh) already produces the hard part: a structured, symptom-indexed report of every phase, marking each check done, missing or wrong. Its closing line is already "paste this whole report into the chat to get it read back to you" — this phase removes the pasting. The model it feeds is the local one, so nothing about your system's internals leaves the machine.
+
+**What to build.** `server/13-medic.sh` installs a `medic` role in `agent_roles` and an `ai-medic` command. The command gathers a context bundle, sends it to the `medic` role through LiteLLM, and prints the diagnosis.
+
+The bundle is a fixed set of read-only commands, not anything the model chooses: `status.sh`, `systemctl --failed`, `journalctl -p err -b` for the current boot, `kubectl get events --sort-by=.lastTimestamp`, `kubectl get pods -A`, `nvidia-smi`, `df -h`, `free -g`, and `dmesg -l err,crit`. Cap it — the last few hundred lines of each — because a 14B model with a 32k context is the consumer and a log flood pushes the real error out of the window.
+
+**The security model, which is the whole point.**
+
+- **It cannot run commands.** The medic's output is a diagnosis and a list of *suggested* commands as text. Nothing executes them. This is not a limitation to be lifted later: the difference between a tool that reads your logs and a tool that acts on root-level guesses from a quantised model is the entire risk, and a wrong `systemctl` or `kubectl delete` at 2am costs more than the convenience saves.
+- **The collector is an allowlist, not a shell.** `ai-medic` runs a hardcoded list of commands. The model never supplies a command string, so there is no path from a poisoned log line to execution.
+- **It runs as you, not as root.** Everything in the bundle is readable by a normal user or via the specific `sudo` rules the earlier phases already install. If a check needs root it is left out.
+- **Treat log contents as untrusted.** This matters more than it sounds: a log line can contain text written by a remote attacker, and that text is now inside a prompt. Because the medic holds no tools at all, the worst case is a misleading answer rather than an action — which is precisely why it holds no tools.
+- **Local model only.** Pin the role to the `local` or `checker` alias rather than a cloud one. Diagnostics contain hostnames, paths, usernames, IPs and occasionally secrets in error messages.
+
+**Done when** `ai-medic` on a machine with a deliberately stopped service names that service, explains the dependency it broke, and suggests the fix without touching anything — and when `agent-runs tail` shows the call.
+
 ## Build order
 
 In numeric order, and each phase is finished and used for a few days before the next one starts.
 
-22 comes first because it is the one that makes the agent layer able to touch real data, and because its failure mode — an over-permissioned tool — is the only one here that can do damage outside the machine. 23 depends on nothing but is far more useful once there is something worth dictating *to*. 24 needs 22 for its workflows to be worth generating. 25 needs the rest to exist before it has anything to show.
+22 comes first because it is the one that makes the agent layer able to touch real data, and because its failure mode — an over-permissioned tool — is the only one here that can do damage outside the machine. 23 depends on nothing but is far more useful once there is something worth dictating *to*. 24 needs 22 for its workflows to be worth generating. 25 needs the rest to exist before it has anything to show. 26 depends only on phase 15 and could be built at any point — do it first if the stack is misbehaving, since it is the smallest of the five by a wide margin.
 
 All four assume the phase 11 memory upgrade, not because they are memory-hungry — together they are perhaps 2 GB of pods — but because they add steady background load to a machine whose model packs already pin 25 to 40 GB. See [ram-upgrade-decision.md](ram-upgrade-decision.md).

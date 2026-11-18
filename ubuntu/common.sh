@@ -14,6 +14,23 @@ export APPS="${APPS:-$HOME/apps}"
 # RTX 5070 Ti is Blackwell: compute capability 12.0.
 export CUDA_ARCH="${CUDA_ARCH:-120}"
 
+# Unattended runs are the normal case for this kit: the model downloads alone
+# are hundreds of GB, so you start it and go to bed. Two things break that if
+# left at their defaults.
+#
+# Every apt call here already passes -y, which answers apt's own questions.
+# It does not answer a package whose postinst opens a config dialog - grub, a
+# kernel upgrade, keyboard-configuration - which ignores -y and waits at an
+# ncurses screen until morning. noninteractive suppresses the dialog and
+# makes dpkg keep the config file already on disk, which is the right answer
+# when nobody is watching.
+export DEBIAN_FRONTEND="${DEBIAN_FRONTEND:-noninteractive}"
+
+# Set by the setup-all wrappers when -y is given. confirm() honours it, which
+# is what makes -y reach the prompts inside the individual phase scripts
+# rather than only the wrapper's own "run this step?" question.
+export AI_ASSUME_YES="${AI_ASSUME_YES:-0}"
+
 if [[ -t 1 ]]; then
     _C_RESET=$'\033[0m'; _C_BOLD=$'\033[1m'; _C_GREEN=$'\033[32m'
     _C_YELLOW=$'\033[33m'; _C_CYAN=$'\033[36m'; _C_RED=$'\033[31m'
@@ -44,8 +61,42 @@ ensure_ai_dirs() {
 
 confirm() {
     local prompt="${1:-Continue?}"
+
+    if [[ "$AI_ASSUME_YES" == 1 ]]; then
+        printf '  %s [y/N] y   (assumed, -y)\n' "$prompt"
+        return 0
+    fi
+
+    # With no terminal - cron, a systemd unit, nohup, a pipe - read returns
+    # immediately with an empty reply, which would silently count as "no" and
+    # skip the step while reporting success. Refuse instead, so the cause is
+    # visible in the log rather than inferred from what is missing later.
+    if [[ ! -t 0 ]]; then
+        err "No terminal to ask: $prompt"
+        die "Re-run with -y to accept prompts like this one non-interactively."
+    fi
+
     read -r -p "  $prompt [y/N] " reply
     [[ "$reply" =~ ^[Yy]$ ]]
+}
+
+# Keep sudo's timestamp alive for the length of an unattended run.
+#
+# sudo caches authentication for ~15 minutes. A single phase here can exceed
+# that comfortably - llama.cpp against CUDA is a long compile, and a Strata
+# tier is hours of downloading - so the next sudo after a long step prompts
+# for a password at 3am and waits forever. This primes the timestamp and then
+# refreshes it in the background until the parent exits.
+sudo_keepalive() {
+    sudo -v || die "sudo authentication failed."
+    (
+        while kill -0 "$$" 2>/dev/null; do
+            sudo -n true 2>/dev/null || exit
+            sleep 60
+        done
+    ) &
+    _SUDO_KEEPALIVE_PID=$!
+    trap 'kill "$_SUDO_KEEPALIVE_PID" 2>/dev/null || true' EXIT
 }
 
 # Add NVIDIA's apt repository for this Ubuntu release. Idempotent.

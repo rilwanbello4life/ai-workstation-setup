@@ -28,6 +28,12 @@ for a in "$@"; do
     esac
 done
 
+# -y has to reach the prompts inside the phase scripts, not just this
+# wrapper's own "run this step?" question.
+if [[ "$AUTO" == yes ]]; then
+    export AI_ASSUME_YES=1
+fi
+
 STEPS=(
     "01-server-base.sh:Always-on base: no sleep, system units, swap, firewall, ai-pause"
     "02-k3s.sh:k3s cluster, GPU runtime, ingress, host-model bridge"
@@ -51,6 +57,14 @@ for entry in "${STEPS[@]}"; do
     fi
 done
 echo
+
+# Authenticate sudo once and hold the timestamp, so a long step cannot cause
+# a password prompt to appear hours into an unattended run.
+if [[ "$AUTO" == yes ]]; then
+    section "sudo"
+    sudo_keepalive
+    ok "Authenticated; the timestamp will be refreshed until this run ends."
+fi
 
 ram="$(ram_gb)"
 if (( ram < 40 )); then

@@ -51,7 +51,8 @@ ai-workstation-setup/
 │   ├── 06-voice.sh              Installs the voice server
 │   ├── 07-strata.sh             Every Strata model this machine can run
 │   ├── 08-remote-access.sh      Tailscale and Open WebUI (optional)
-│   └── 09-gaming.sh             Steam, Proton, GameMode, MangoHud (optional)
+│   ├── 09-gaming.sh             Steam, Proton, GameMode, MangoHud (optional)
+│   └── 10-models.sh             ComfyUI, voice and GGUF downloads
 ├── server/                      Phases 12-21 — the always-on platform
 │   ├── setup-all.sh             Runs every step below, in order
 │   ├── common.sh                Shared paths and cluster helpers
@@ -116,7 +117,7 @@ Every script has a hand-written equivalent: [reference/manual-windows.md](refere
 | 6 | Windows AI stack: Strata, LM Studio, ComfyUI, Pi, voice | Windows | [windows/05-install-ai-stack.ps1](windows/05-install-ai-stack.ps1) |
 | 7 | Install Ubuntu on its own drive | physical + Linux | [reference/ubuntu-install-walkthrough.md](reference/ubuntu-install-walkthrough.md) |
 | 8 | Ubuntu AI stack | Linux | [ubuntu/setup-all.sh](ubuntu/setup-all.sh) |
-| 9 | Download models — on each OS separately | both | [models/MANIFEST.md](models/MANIFEST.md) |
+| 9 | Download models — on each OS separately | both | [ubuntu/10-models.sh](ubuntu/10-models.sh), [models/MANIFEST.md](models/MANIFEST.md) |
 | 10 | Remote access from phone/laptop *(optional)* | both | [reference/remote-access.md](reference/remote-access.md) |
 | 11 | Prove the RAM with `memtest86+`, then pick a Strata pack to match | Linux | [reference/ram-upgrade-decision.md](reference/ram-upgrade-decision.md) |
 
@@ -135,11 +136,27 @@ Phases 12 onward turn the Ubuntu side into the always-on server. They are indepe
 | 20 | GitOps: Argo CD watching a local repo *(optional)* | Linux | [server/08-gitops.sh](server/08-gitops.sh) |
 | 21 | GPU queue: fair sharing and per-person profiles *(optional)* | Linux | [server/09-gpu-queue.sh](server/09-gpu-queue.sh) |
 
-**Phases 22 to 25 are specified but not built**: an MCP gateway putting Gmail, Drive and Calendar in reach of the agents, a dictation front door that decides what to do with what you said, an agent that writes n8n workflows, and a dashboard over all of it. [reference/roadmap.md](reference/roadmap.md) gives each one its files, its port and the decisions already taken, so building them is implementation rather than design. Nothing in phases 1 to 21 depends on them.
+**Phases 22 to 26 are specified but not built**: an MCP gateway putting Gmail, Drive and Calendar in reach of the agents, a dictation front door that decides what to do with what you said, an agent that writes n8n workflows, a dashboard over all of it, and a read-only medic that diagnoses the machine from `status.sh` and the logs. [reference/roadmap.md](reference/roadmap.md) gives each one its files, its port and the decisions already taken, so building them is implementation rather than design. Nothing in phases 1 to 21 depends on them.
 
 Most scripted phases have a manual equivalent — Windows phases 1, 2, 4, 5, 6 and 10 in [reference/manual-windows.md](reference/manual-windows.md), phase 8 in [reference/manual-ubuntu.md](reference/manual-ubuntu.md), and phases 12–18 in [reference/manual-server.md](reference/manual-server.md). Phases 20 and 21 do not have one; they are documented by behaviour instead, in [reference/gitops.md](reference/gitops.md) and [reference/gpu-queue.md](reference/gpu-queue.md).
 
 Two references worth reading before you need them: [reference/ports.md](reference/ports.md) for what runs where and what can run simultaneously, and [reference/troubleshooting.md](reference/troubleshooting.md) when something misbehaves. If you run phases 20 or 21, add [reference/gitops.md](reference/gitops.md) and [reference/gpu-queue.md](reference/gpu-queue.md).
+
+### Running it unattended
+
+Every script is re-runnable: each one checks what is already in place, leaves it alone, and does only what is missing. Re-running after a failure, a reboot or a half-finished download is the expected way to use them, not a recovery procedure.
+
+The downloads are the long part — the full catalogue is most of a terabyte — so the sequence is built to be started and left:
+
+```sh
+./ubuntu/setup-all.sh -y --tier all      # everything, nothing to answer
+```
+
+`-y` authenticates `sudo` once and refreshes the timestamp for the whole run, suppresses package configuration dialogs, and answers the questions *inside* each phase rather than only the wrapper's own. `--tier all` takes the whole 788 GB Strata catalogue instead of the 150 GB default. The model downloads run last, after every prompt has been dealt with.
+
+Two phases are left out of `-y` deliberately and must be asked for by name: `./setup-all.sh 08` signs into Tailscale in a browser, and `./setup-all.sh 09` installs several GB of 32-bit gaming libraries.
+
+If a single model fails to download, the run carries on and reports it at the end; re-running fetches only what is missing. The one thing that will stop it early is a plan that cannot fit on the disk, which is checked before the first byte rather than discovered 600 GB in.
 
 ## Once it is built
 
