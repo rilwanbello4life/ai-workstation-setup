@@ -187,14 +187,27 @@ It is not the download. `strata launch` downloads a pack and then *loads* it, an
 
 Two things follow. **Run the installer from a plain console or `tmux`, never an editor's built-in terminal** — the terminal is the download's parent, so killing the editor kills the download too, which is why it looks like the download keeps failing. And `07-strata.sh` now runs each load inside `systemd-run --user --scope -p MemoryMax=`, set to RAM minus 6 GB, so an overrun kills Strata rather than your session. On a 96 GB machine that cap never binds.
 
-Distinguish the two failure modes before changing anything:
+Distinguish the failure modes before changing anything. There are three, not two, and they need different queries:
 
 ```sh
-journalctl -k --since -1d | grep -iE 'oom|killed process'   # kernel killed it
-journalctl --user -u systemd-oomd --since -1d | tail        # systemd-oomd killed it
+# 1. The kernel OOM killer. Note that -k implies -b, so this is THIS BOOT
+#    only - add -b -1 for the previous one. A kill looks like
+#    "Out of memory: Killed process 1234 (code)".
+journalctl -k | grep -iE 'out of memory|killed process'
+
+# 2. systemd-oomd, which kills a whole cgroup on memory-pressure before the
+#    kernel ever runs out. It is a SYSTEM service, so no --user, and it logs
+#    nothing to the kernel buffer - query 1 cannot see it.
+journalctl -u systemd-oomd --since -3d --no-pager | tail -30
+systemctl is-active systemd-oomd
+
+# 3. Everything, across reboots, when the first two come back empty.
+journalctl --since -3d --no-pager | grep -iE 'oom|killed process|oom-kill'
 ```
 
-If instead the editor *reloads its own window* and says `JavaScript heap out of memory`, that is the editor's renderer, not the system — the progress-bar output fills its terminal scrollback. Lower the scrollback limit or, again, do not run the installer in it.
+`OOM killer disabled.` followed immediately by `OOM killer enabled.` is **not** an OOM event — the kernel disables it while freezing processes for suspend, so that pair just marks a suspend/resume cycle.
+
+If all three are empty and the editor *reloaded its own window* or said `JavaScript heap out of memory`, nothing on the system killed it: that is the editor's own renderer heap, which is capped around 4 GB regardless of how much RAM you have. Strata and `hf` emit a very large number of progress-bar redraws, and the integrated terminal keeps them all. Lower the scrollback limit or, again, do not run the installer in it.
 
 **I am on 32 GB and want to pre-download the 96 GB packs anyway.**
 That is supported, with one caveat worth knowing: Strata has no download-only mode. `strata launch --plan` previews without downloading, and `strata models` only inspects — fetching happens as part of a real launch. So the pack downloads in full, the load that follows is killed, and the run reports a failure at the end. **The download is kept**, so after fitting the memory the same command only loads. Tiers F and G warn about exactly this before starting.
