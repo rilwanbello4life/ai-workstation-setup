@@ -30,6 +30,45 @@ require_k3s() {
         die "Cannot reach the cluster. Is k3s running? systemctl status k3s"
 }
 
+# Phase 13 creates the PersistentVolumes the platform workloads claim. Without
+# them a deployment applies cleanly and then sits Pending forever on a missing
+# PVC, which reads as "the image is slow" rather than "storage is absent".
+require_platform_storage() {
+    local missing=()
+    local pvc
+    for pvc in postgres-data n8n-data openwebui-data; do
+        kubectl -n "$K8S_NS" get pvc "$pvc" >/dev/null 2>&1 || missing+=("$pvc")
+    done
+    (( ${#missing[@]} == 0 )) && return 0
+    err "Missing PersistentVolumeClaims in $K8S_NS: ${missing[*]}"
+    err "Phase 13 did not finish - it applies k8s/02-storage.yaml."
+    die "Run ./02-k3s.sh first, then this script again."
+}
+
+# The IPv4 address k3s should call this node.
+#
+# Left to itself k3s inspects the interfaces at startup and can choose the
+# Tailscale 100.64.0.0/10 address. That address is not in the kubelet serving
+# certificate, so afterwards every 'kubectl logs', 'exec' and 'port-forward'
+# fails with "certificate is valid for ... not 100.x.x.x" while the cluster
+# otherwise looks healthy. Taking the address on the default route, with any
+# tailscale interface excluded, keeps the node IP the same whether or not the
+# tailnet happens to be up.
+lan_ip() {
+    local dev ip
+    # Read the token after "dev" rather than a fixed column: a default route
+    # can be written "default via GW dev IF ..." or "default dev IF table N",
+    # and the interface is in a different position in each.
+    dev="$(ip -4 route show default 2>/dev/null | awk '
+        { d = ""
+          for (i = 1; i <= NF; i++) if ($i == "dev") d = $(i + 1)
+          if (d != "" && d !~ /^tailscale/) { print d; exit } }')"
+    [[ -n "$dev" ]] || return 1
+    ip="$(ip -4 addr show "$dev" 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1 | head -n1)"
+    [[ -n "$ip" ]] || return 1
+    echo "$ip"
+}
+
 # Total RAM in GiB. MemTotal is in KiB and excludes firmware-reserved memory,
 # so a 64 GB machine reports about 62. Callers must allow for that.
 ram_gb() {
@@ -54,8 +93,18 @@ wait_for_deploy() {
         return 0
     fi
     warn "$name did not become ready in ${timeout}s."
-    warn "Check with: kubectl -n $ns describe deployment/$name"
-    warn "       and: kubectl -n $ns logs deployment/$name --tail=50"
+    # Report the pod state here rather than leaving it to be looked up. A
+    # deployment describe shows only the replica count, and 'logs' needs a
+    # container that has actually started - neither says anything useful when
+    # the pod is Pending on a missing PVC, which is the common case.
+    kubectl -n "$ns" get pods -l "app=$name" \
+        -o custom-columns='POD:.metadata.name,STATUS:.status.phase,REASON:.status.conditions[0].reason' \
+        2>/dev/null | sed 's/^/    /' || true
+    kubectl -n "$ns" describe pod -l "app=$name" 2>/dev/null \
+        | sed -n '/^Events:/,$p' | head -n 12 | sed 's/^/    /' || true
+    warn "In order: kubectl -n $ns describe pod -l app=$name"
+    warn "          kubectl -n $ns get pvc"
+    warn "          kubectl -n $ns logs deployment/$name --tail=50"
     return 1
 }
 

@@ -71,12 +71,47 @@ else
     # servicelb stays too; it is how game servers get LoadBalancer ports.
     # The eviction threshold must be quoted: the '<' is part of the kubelet
     # flag value, not a shell redirect.
+    #
+    # --node-ip is pinned rather than auto-detected. See lan_ip() in
+    # common.sh: with Tailscale installed, k3s can register the node under
+    # its 100.x address, which is absent from the kubelet serving
+    # certificate and breaks logs, exec and port-forward.
+    node_ip_args=()
+    if NODE_IP="$(lan_ip)"; then
+        info "Pinning the node IP to $NODE_IP."
+        node_ip_args=(--node-ip "$NODE_IP")
+    else
+        warn "Could not determine a LAN address; letting k3s choose."
+        warn "If kubectl logs later fails on a certificate, re-run this script."
+    fi
+
     curl -sfL https://get.k3s.io | sudo sh -s - server \
         --write-kubeconfig-mode 644 \
         --disable-cloud-controller \
+        ${node_ip_args[@]+"${node_ip_args[@]}"} \
         '--kubelet-arg=eviction-hard=memory.available<1Gi' \
         '--kubelet-arg=system-reserved=memory=2Gi'
     ok "k3s installed."
+fi
+
+# Repair an existing node whose address moved after the certificate was
+# issued - the usual cause is Tailscale coming up between two k3s starts.
+# k3s regenerates the serving certificate from the current addresses when
+# it is missing, so removing it is the whole fix.
+if have openssl && [[ -f /var/lib/rancher/k3s/agent/serving-kubelet.crt ]]; then
+    cur_ip="$(kubectl get node -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null || true)"
+    if [[ -n "$cur_ip" ]] && ! sudo openssl x509 -in /var/lib/rancher/k3s/agent/serving-kubelet.crt \
+            -noout -text 2>/dev/null | grep -q "IP Address:${cur_ip}\b"; then
+        warn "The kubelet certificate does not cover the node address ${cur_ip}."
+        warn "kubectl logs, exec and port-forward would fail against it."
+        info "Removing the stale certificate so k3s reissues it."
+        sudo systemctl stop k3s
+        sudo rm -f /var/lib/rancher/k3s/agent/serving-kubelet.crt \
+                   /var/lib/rancher/k3s/agent/serving-kubelet.key
+        sudo systemctl start k3s
+        kubectl wait --for=condition=Ready node --all --timeout=120s >/dev/null 2>&1 || true
+        ok "Certificate reissued for ${cur_ip}."
+    fi
 fi
 
 # --kubelet-arg above is the important part. Default eviction thresholds are

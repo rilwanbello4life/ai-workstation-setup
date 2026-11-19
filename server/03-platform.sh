@@ -16,6 +16,7 @@
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 require_not_root
 require_k3s
+require_platform_storage
 
 while (( $# )); do
     case "$1" in

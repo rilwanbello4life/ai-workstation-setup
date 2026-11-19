@@ -260,6 +260,29 @@ The script now refuses at the start rather than part way through, but if you hit
 
 Creating `/var/lib/rancher/k3s/storage` by hand does not help — that directory belongs to k3s, which runs as root and makes it when first needed. The line naming it in the output is informational, not the failure.
 
+**`kubectl logs` fails with `certificate is valid for ... not 100.x.x.x`.**
+k3s registered the node under its Tailscale address, and the kubelet serving certificate was issued for the LAN address instead. Everything that goes through the kubelet — `logs`, `exec`, `port-forward`, `top` — fails, while the cluster otherwise looks completely healthy. The usual trigger is Tailscale coming up between two k3s starts, because phase 13 restarts k3s to pick up the nvidia runtime.
+
+`02-k3s.sh` now pins `--node-ip` at install and repairs an existing node on re-run, so the fix is to run it again. By hand it is the same two steps — k3s reissues the certificate from the current addresses whenever it is missing:
+
+```bash
+sudo systemctl stop k3s
+sudo rm -f /var/lib/rancher/k3s/agent/serving-kubelet.{crt,key}
+sudo systemctl start k3s
+```
+
+Confirm which address the node is actually using with `kubectl get node -o wide`. If it is a `100.x` address and you would rather it were not, pin it in `/etc/rancher/k3s/config.yaml` with `node-ip: <lan address>` and restart.
+
+**`03-platform.sh` reports "Postgres did not start" and the pod never schedules.**
+Almost always a missing PersistentVolumeClaim rather than anything wrong with Postgres. Check the claims before the logs:
+
+```bash
+kubectl -n platform get pvc
+kubectl -n platform describe pod -l app=postgres
+```
+
+If the claims are absent, phase 13 did not finish — `02-k3s.sh` applies `k8s/02-storage.yaml` on the line immediately after it creates the `/srv/platform` subdirectories, so the permission failure described above stops it exactly one line short of creating the storage. Run `./01-server-base.sh --apply`, then `./02-k3s.sh`, then `./03-platform.sh`. The script now refuses up front if the claims are missing rather than waiting 180 seconds for a pod that cannot schedule.
+
 **A pod sits `Pending` forever.**
 Three causes, in order of likelihood. `kubectl -n platform describe pod <name>` names which one.
 1. The namespace ResourceQuota is full. Every pod must declare requests and limits, and the totals are capped at 12Gi requests in `platform` and 8Gi in `games`.
