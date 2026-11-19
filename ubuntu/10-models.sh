@@ -10,9 +10,17 @@
 #
 #   ./10-models.sh              every group (image, video, voice, text)
 #   ./10-models.sh image voice  only those groups
+#   ./10-models.sh --status     what is downloaded and what is left
 #
-# Re-running is cheap: already-present files are skipped by name, and partial
-# downloads resume rather than restart. Nothing here prompts.
+# Re-running is cheap, and after the first run it is close to free: every
+# confirmed download is recorded in $AI_ROOT/.downloads.tsv and a recorded
+# entry is not handed to the Hugging Face CLI at all. That matters because
+# the CLI contacts the hub for each entry even when the file is already
+# cached, so a re-run of a finished manifest used to spend a long time on
+# the network to do nothing. Nothing here prompts.
+#
+# Set SKIP_FAILED=yes to leave previously-failed entries alone instead of
+# retrying them.
 #
 # Background: models/MANIFEST.md
 
@@ -28,8 +36,30 @@ DOWNLOADER="$KIT_ROOT/models/download-models.sh"
 # IDs, and assigning to it is silently ignored. Using it here made the loop
 # below iterate over group numbers like 1000 and 27, which match no row in
 # manifest.tsv, so the script reported success having downloaded nothing.
-WANT_GROUPS=("$@")
+WANT_GROUPS=()
+SHOW_STATUS=no
+for arg in "$@"; do
+    case "$arg" in
+        --status) SHOW_STATUS=yes ;;
+        *)        WANT_GROUPS+=("$arg") ;;
+    esac
+done
 (( ${#WANT_GROUPS[@]} )) || WANT_GROUPS=(all)
+
+if [[ "$SHOW_STATUS" == yes ]]; then
+    ledger_init
+    for g in "${WANT_GROUPS[@]}"; do
+        awk -F'\t' -v g="$g" \
+            '$1 !~ /^#/ && NF >= 4 && (g == "all" || $1 == g) {
+                 label = ($3 == "*") ? $2 : $3
+                 sub(/.*\//, "", label)
+                 printf "%s::%s\t%-6s %s\n", $2, $3, $1, label
+             }' "$KIT_ROOT/models/manifest.tsv" \
+            | ledger_progress file "Manifest - group '$g'"
+    done
+    info "Ledger: $DOWNLOAD_LEDGER"
+    exit 0
+fi
 
 # ---------------------------------------------------------------------------
 section "Prerequisites"
@@ -86,13 +116,14 @@ fi
 # ---------------------------------------------------------------------------
 for g in "${WANT_GROUPS[@]}"; do
     section "Downloading group '$g'"
-    if bash "$DOWNLOADER" "$g"; then
+    if SKIP_FAILED="${SKIP_FAILED:-no}" bash "$DOWNLOADER" "$g"; then
         ok "Group '$g' complete."
     else
         # One unreachable repository should not abandon the other groups
         # overnight. The downloader prints which entry failed.
         err "Group '$g' had failures."
-        warn "Re-run to retry just the missing files:  ./10-models.sh $g"
+        warn "Re-run to retry only what is missing:  ./10-models.sh $g"
+        warn "Leave the failures alone:              SKIP_FAILED=yes ./10-models.sh $g"
         failed=yes
     fi
 done
@@ -110,6 +141,9 @@ cat <<EOF
 
   Serve the GGUF:
       $APPS/start-llama-server.sh Qwen2.5-14B-Instruct-Q4_K_M.gguf
+
+  What has been downloaded so far:  ./10-models.sh --status
+  Ledger (the source of truth):     $DOWNLOAD_LEDGER
 
   Strata packs are separate and much larger - see ./07-strata.sh --help.
   What each entry is and why it was chosen: models/MANIFEST.md

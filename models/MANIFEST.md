@@ -117,3 +117,46 @@ Strata is the reason the two columns differ. It serves one model at a time, so i
 On **Ubuntu** that lands against roughly 1 863 GiB of usable space on the 2 TB drive. The 998 GB Strata catalogue, these ComfyUI and voice models, the cluster's container images, the game-server worlds and the local backups come to about 1 456 GB, which leaves roughly 221 GB for a Steam library after a 186 GB free-space reserve. [partition-layout.md](../reference/partition-layout.md) has the full arithmetic.
 
 On **Windows** it is tighter: Windows and applications take ~80 GB of the 1 TB drive, leaving about 650 GB for games once the stack is in. If you want more room for games, skip the `video` group on Windows — that is 38 GB of the table above, and Wan 2.2 is the slowest thing on a 16 GB card anyway. Run it on Ubuntu instead.
+
+## The download ledger
+
+Every confirmed download is recorded in `$AI_ROOT/.downloads.tsv`, and that
+file — not the filesystem, and not the Hugging Face cache — is what later runs
+consult. A recorded entry is skipped outright: no hub request, no directory
+scan, nothing handed to Strata or to `hf`.
+
+This is not only about speed. `hf` contacts the hub for every entry even when
+the file is already cached, so re-running a finished manifest used to spend a
+long time on the network in order to do nothing. Strata is worse: the only way
+to ask it for a pack is `strata launch`, which loads the pack after fetching
+it, and on a 32 GB machine loading a 111 GB pack is what gets the desktop
+killed.
+
+It is a five-column TSV — `kind`, `id`, `status`, `when`, `note` — where `kind`
+is `strata` or `file` and the last row for an id wins. Readable and editable by
+hand: delete a row to force a re-download, or change `failed` to `ok` to stop a
+retry.
+
+| Want | Strata packs | Everything else |
+|---|---|---|
+| See what is done and what is left | `./07-strata.sh --tier all --status` | `./10-models.sh --status` |
+| Fetch without loading | `./07-strata.sh --tier all --install -y --download-only` | not needed — these are never loaded |
+| Retry the failures | re-run; failures are retried by default | re-run |
+| Leave the failures alone | add `--skip-failed` | `SKIP_FAILED=yes ./10-models.sh` |
+
+If the ledger is deleted, nothing is lost. Both scripts fall back to checking
+the disk, find the files already there, and record them again — so recovery
+costs one pass, not one re-download.
+
+### Downloading on a machine that cannot run the models
+
+`strata launch` always loads a pack after downloading it, and there is no
+download-only flag in Strata itself. `--download-only` supplies one: it runs
+the launch inside a systemd scope capped at 12 GB. Downloading needs very
+little memory and loading needs tens of gigabytes, so the fetch completes and
+the load is killed the moment it starts.
+
+That is why a pack killed for memory is recorded as **downloaded**. Reaching
+the point of being killed proves the download finished — a network failure
+exits long before anything large is resident. The bytes are on disk, and after
+a memory upgrade the same pack loads without fetching anything again.

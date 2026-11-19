@@ -65,21 +65,44 @@ Usage:
   ./07-strata.sh --tier f --install   the 96 GB pack, on four DIMMs only
   ./07-strata.sh --tier g --install   the two that also need 'ai-pause'
   ./07-strata.sh --tier all --install everything this machine allows
+  ./07-strata.sh --tier all --install --download-only
+                                      fetch every pack without loading any
+  ./07-strata.sh --status             what is downloaded, what is left
 
 Options:
   --tier LETTERS   any combination of a b c d e f g, or "all"  (default: a)
   --install        actually download, instead of printing the plan
+  --download-only  fetch each pack but do not keep it loaded. Strata has no
+                   such mode of its own, so this caps the load step's memory
+                   hard and lets it be killed the moment it starts. The pack
+                   is already on disk by then. This is how you fill the drive
+                   on a machine that cannot yet run what it is downloading.
+  --retry-failed   re-attempt entries the ledger records as failed (default)
+  --skip-failed    leave previously failed entries alone
+  --status         print the ledger and exit, changing nothing
   -y, --yes        do not ask before each model
+
+Anything recorded as downloaded is skipped outright on the next run - not
+re-checked, not re-verified, not handed to Strata at all. The record lives in
+$AI_ROOT/.downloads.tsv and is the source of truth.
 
 EOF
 }
 
+DOWNLOAD_ONLY=no
+SKIP_FAILED=no
+SHOW_STATUS=no
+
 while (( $# )); do
     case "$1" in
-        --tier)    TIERS="${2:-a}"; shift 2 ;;
-        --install) DO_INSTALL=yes; shift ;;
-        -y|--yes)  ASSUME_YES=yes; shift ;;
-        -h|--help) usage; exit 0 ;;
+        --tier)          TIERS="${2:-a}"; shift 2 ;;
+        --install)       DO_INSTALL=yes; shift ;;
+        --download-only) DOWNLOAD_ONLY=yes; DO_INSTALL=yes; shift ;;
+        --retry-failed)  SKIP_FAILED=no; shift ;;
+        --skip-failed)   SKIP_FAILED=yes; shift ;;
+        --status)        SHOW_STATUS=yes; shift ;;
+        -y|--yes)        ASSUME_YES=yes; shift ;;
+        -h|--help)       usage; exit 0 ;;
         *) die "Unknown option: $1 (try --help)" ;;
     esac
 done
@@ -185,6 +208,23 @@ for entry in "${selected[@]}"; do
     printf '  %-5s %-7s %-11s %4sG  %s\n' "${tier^^}" "$fam" "$mod" "$gb" "$desc"
 done
 echo
+
+# The plan rows, as the ledger sees them. Built once and reused for every
+# progress print so the list cannot drift from what is actually being done.
+strata_rows() {
+    local e f m t g d
+    for e in "${selected[@]}"; do
+        IFS='|' read -r f m t g d <<<"$e"
+        printf '%s/%s\t%-5s %-7s %-11s %4sG\n' "$f" "$m" "${t^^}" "$f" "$m" "$g"
+    done
+}
+
+if [[ "$SHOW_STATUS" == yes ]]; then
+    strata_rows | ledger_progress strata "Strata packs - tier ${TIERS}"
+    echo
+    info "Ledger: $DOWNLOAD_LEDGER"
+    exit 0
+fi
 info "Download total: ~${total} GB (plus ~6 GB MTP draft layer, shared)"
 info "Spendable:      ${spendable_gb} GB"
 
@@ -398,20 +438,50 @@ EOF
 # after the memory upgrade just loads them. The cap is generous on purpose -
 # on a 96 GB machine it never binds, and it is only the small-memory case it
 # is protecting.
+#
+# --download-only turns the same mechanism into the download-only mode
+# Strata does not have. Downloading needs very little memory; loading needs
+# tens of gigabytes. Setting the cap just above what a download needs means
+# the fetch runs to completion and the load is killed the instant it begins,
+# which is precisely the behaviour wanted on a machine that cannot yet run
+# what it is filling the drive with.
 MEM_GUARD=()
+CAP_GB=0
 if (( ram_gb > 12 )) && have systemd-run; then
     # User scopes only accept MemoryMax where systemd delegates the memory
     # controller. Probe rather than assume: without delegation the flag is
     # rejected and every launch below would fail for the wrong reason.
     if systemd-run --user --scope --quiet -p MemoryMax=1G true >/dev/null 2>&1; then
+        if [[ "$DOWNLOAD_ONLY" == yes ]]; then
+            CAP_GB=12
+        else
+            CAP_GB=$(( ram_gb - 6 ))
+        fi
         MEM_GUARD=(systemd-run --user --scope --quiet
-                   -p MemoryMax="$(( ram_gb - 6 ))G" --)
-        info "Loads are capped at $(( ram_gb - 6 )) GB so an overrun kills Strata, not your session."
+                   -p MemoryMax="${CAP_GB}G" --)
     else
         warn "systemd cannot cap memory for user scopes here."
         warn "A pack larger than RAM may get your desktop killed instead of Strata."
+        [[ "$DOWNLOAD_ONLY" == yes ]] && \
+            warn "--download-only cannot stop the load either; expect heavy paging."
     fi
 fi
+
+if [[ "$DOWNLOAD_ONLY" == yes ]]; then
+    cat <<EOF
+  Download-only. Each pack is fetched in full, then the load that Strata
+  always does next is killed at ${CAP_GB:-?} GB. A pack recorded as downloaded is
+  skipped entirely next time - not re-checked, not handed to Strata at all.
+
+  "load killed" below is the expected, successful outcome here.
+
+EOF
+elif (( CAP_GB > 0 )); then
+    info "Loads are capped at ${CAP_GB} GB so an overrun kills Strata, not your session."
+fi
+
+ledger_init
+info "Ledger: $DOWNLOAD_LEDGER"
 
 installed=()
 failed=()
@@ -419,20 +489,43 @@ failed=()
 for entry in "${selected[@]}"; do
     IFS='|' read -r fam mod tier gb desc <<<"$entry"
     preset="$(tr '[:upper:]' '[:lower:]' <<<"${fam}-${mod}")"
+    id="${fam}/${mod}"
+    prior="$(ledger_status strata "$id")"
 
     section "${fam} / ${mod}  (~${gb} GB)"
+
+    # The whole point of the ledger: no network call, no disk scan, no Strata
+    # invocation. An entry already recorded costs nothing to pass over.
+    # No progress table on the skip paths: a finished run would otherwise
+    # print the same table once per model. The summary prints it once.
+    if [[ "$prior" == ok ]]; then
+        ok "Already downloaded. Skipping."
+        installed+=("$preset")
+        continue
+    fi
+    if [[ "$prior" == failed && "$SKIP_FAILED" == yes ]]; then
+        warn "Previously failed and --skip-failed is set. Leaving it."
+        failed+=("$id")
+        continue
+    fi
+    [[ "$prior" == failed ]] && info "Previously failed; retrying."
     info "$desc"
 
     if [[ "$ASSUME_YES" != yes ]] && ! confirm "Install this one?"; then
         warn "Skipped."
+        strata_rows | ledger_progress strata "Tier ${TIERS}"
         continue
     fi
 
     # --yes skips prompts, --no-tui serves and returns instead of opening the
     # monitor, --save-preset makes switching to it a one-liner later.
-    if "${MEM_GUARD[@]}" strata launch --family "$fam" --model "$mod" \
-                     --yes --no-tui --save-preset "$preset"; then
-        ok "${fam}/${mod} installed and serving."
+    rc=0
+    "${MEM_GUARD[@]}" strata launch --family "$fam" --model "$mod" \
+                     --yes --no-tui --save-preset "$preset" || rc=$?
+
+    if (( rc == 0 )); then
+        ok "${fam}/${mod} downloaded and loaded."
+        ledger_mark strata "$id" ok "downloaded and verified"
 
         # Checked, not assumed. This used to discard the result and print
         # "Stopped" either way, so a stop that failed left the pack resident
@@ -445,21 +538,47 @@ for entry in "${selected[@]}"; do
             warn "If it is still serving, the next pack will load on top of it."
         fi
         installed+=("$preset")
-    else
-        # Expected on a machine too small for this pack: the download finished
-        # and only the load step was killed, so nothing has to be re-fetched.
-        err "${fam}/${mod} failed to load."
-        if (( ram_gb < 42 )); then
-            info "On ${ram_gb} GB this is normal for the larger packs. The download is"
-            info "kept - re-run after the memory upgrade and it will only load."
+
+    elif (( rc == 137 )); then
+        # 137 is SIGKILL, which here means the cgroup hit MemoryMax. Strata
+        # downloads before it loads, so reaching the point of being killed
+        # for memory proves the download finished - a network failure exits
+        # long before anything large is resident. That distinction is what
+        # lets the ledger record a download as complete on a machine that
+        # cannot load it.
+        if (( CAP_GB > 0 )); then
+            ok "${fam}/${mod} downloaded; load killed at ${CAP_GB} GB as intended."
+        else
+            # No cap was available, so this kill came from the kernel or
+            # systemd-oomd. Same conclusion: the download had to finish for
+            # the load to start and be killed.
+            ok "${fam}/${mod} downloaded; the load was killed for memory."
         fi
+        ledger_mark strata "$id" ok "downloaded, load not verified"
+        installed+=("$preset")
+
+    else
+        err "${fam}/${mod} failed (exit $rc)."
+        if [[ "$DOWNLOAD_ONLY" == yes ]]; then
+            warn "This is not the memory cap - the download itself did not finish."
+        elif (( ram_gb < 42 )); then
+            info "On ${ram_gb} GB the larger packs cannot load. Use --download-only"
+            info "to fetch them now and verify after the memory upgrade."
+        fi
+        ledger_mark strata "$id" failed "exit $rc"
         warn "Retry on its own:  strata launch --family $fam --model $mod"
-        failed+=("$fam/$mod")
+        failed+=("$id")
     fi
+
+    strata_rows | ledger_progress strata "Tier ${TIERS}"
 done
 
 # ---------------------------------------------------------------------------
 section "Summary"
+
+strata_rows | ledger_progress strata "Tier ${TIERS}"
+info "Ledger: $DOWNLOAD_LEDGER"
+echo
 
 if (( ${#installed[@]} )); then
     ok "Installed ${#installed[@]} model(s). Switch between them with:"
@@ -473,6 +592,8 @@ fi
 if (( ${#failed[@]} )); then
     echo
     warn "Failed: ${failed[*]}"
+    info "Retry just those:    $0 --tier $TIERS --install -y"
+    info "Leave them alone:    $0 --tier $TIERS --install -y --skip-failed"
 fi
 
 cat <<'EOF'

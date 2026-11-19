@@ -250,6 +250,80 @@ EOF
     return 0
 }
 
+# ---------------------------------------------------------------------------
+# A record of what has been downloaded, so a re-run skips it without asking
+# the network or the disk.
+#
+# Checking "is it there already" is not free at this scale. hf contacts the
+# hub for every entry even when the file is cached, and Strata re-reads a
+# pack directory before deciding. Across ~1.1 TB of models that is minutes of
+# waiting before anything happens, every single run. The ledger makes an
+# already-finished entry cost nothing: it is not attempted at all.
+#
+# Tab-separated, one row per entry, last row wins:
+#
+#   kind    id                      status  when                 note
+#   strata  qwen/UD-IQ4_XS          ok      2026-11-19T20:14:02  downloaded
+#   file    bartowski/x::y.gguf     failed  2026-11-19T20:31:55  hf exit 1
+#
+# models/download-models.sh writes the same format without sourcing this
+# file, because it has to keep working standalone next to its PowerShell
+# twin. Keep the two in step.
+DOWNLOAD_LEDGER="${DOWNLOAD_LEDGER:-$AI_ROOT/.downloads.tsv}"
+
+ledger_init() {
+    mkdir -p "$(dirname "$DOWNLOAD_LEDGER")" 2>/dev/null || true
+    [[ -f "$DOWNLOAD_LEDGER" ]] && return 0
+    printf '# kind\tid\tstatus\twhen\tnote\n' > "$DOWNLOAD_LEDGER"
+}
+
+# Prints ok, failed, or nothing at all. Never fails: an unreadable ledger
+# must degrade to "unknown, try it" rather than end the run.
+ledger_status() {
+    local kind="$1" id="$2"
+    [[ -f "$DOWNLOAD_LEDGER" ]] || return 0
+    awk -F'\t' -v k="$kind" -v i="$id" \
+        '$1 == k && $2 == i { s = $3 } END { if (s != "") print s }' \
+        "$DOWNLOAD_LEDGER" 2>/dev/null || true
+}
+
+ledger_mark() {
+    local kind="$1" id="$2" status="$3" note="${4:-}" tmp
+    ledger_init
+    tmp="$(mktemp)" || return 0
+    # Drop any earlier row for this id so the file does not grow without
+    # bound across retries, then append the current verdict.
+    awk -F'\t' -v k="$kind" -v i="$id" '!($1 == k && $2 == i)' \
+        "$DOWNLOAD_LEDGER" > "$tmp" 2>/dev/null || true
+    printf '%s\t%s\t%s\t%s\t%s\n' \
+        "$kind" "$id" "$status" "$(date -Is 2>/dev/null || date)" "$note" >> "$tmp"
+    cat "$tmp" > "$DOWNLOAD_LEDGER" 2>/dev/null || true
+    rm -f "$tmp"
+}
+
+# Render the whole plan with each entry's state, so one glance answers "what
+# is left". Rows arrive on stdin as  id <TAB> label.
+ledger_progress() {
+    local kind="$1" title="${2:-Progress}" id label st mark colour
+    local n_ok=0 n_fail=0 n_todo=0 out=""
+
+    while IFS=$'\t' read -r id label; do
+        [[ -n "$id" ]] || continue
+        st="$(ledger_status "$kind" "$id")"
+        case "$st" in
+            ok)     mark="[done]"; colour="$_C_GREEN";  n_ok=$((n_ok + 1)) ;;
+            failed) mark="[fail]"; colour="$_C_RED";    n_fail=$((n_fail + 1)) ;;
+            *)      mark="[    ]"; colour="";           n_todo=$((n_todo + 1)) ;;
+        esac
+        out+="$(printf '    %s%s%s %s' "$colour" "$mark" "$_C_RESET" "$label")"$'\n'
+    done
+
+    printf '\n  %s%s%s\n' "$_C_BOLD" "$title" "$_C_RESET"
+    printf '%s' "$out"
+    printf '  %s%d done, %d failed, %d to go%s\n' \
+        "$_C_BOLD" "$n_ok" "$n_fail" "$n_todo" "$_C_RESET"
+}
+
 ensure_shell_env() {
     local tmp
     mkdir -p "$(dirname "$SHELL_ENV_FILE")"
