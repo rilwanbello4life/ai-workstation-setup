@@ -130,15 +130,11 @@ else
     die "/etc/rancher/k3s/k3s.yaml not found - did k3s start?"
 fi
 
-# Make KUBECONFIG permanent for interactive shells.
-if ! grep -q 'KUBECONFIG' "$HOME/.profile" 2>/dev/null; then
-    cat >> "$HOME/.profile" <<'EOF'
-
-# k3s cluster access (added by server/02-k3s.sh)
-export KUBECONFIG="$HOME/.kube/config"
-EOF
-    info "Added KUBECONFIG to ~/.profile"
-fi
+# Make KUBECONFIG permanent for interactive shells. ensure_shell_env owns the
+# whole environment file, so KUBECONFIG is set in the same place as AI_ROOT
+# and the /srv paths rather than appended separately here - and it reaches
+# desktop terminals, which only read ~/.bashrc.
+ensure_shell_env
 
 info "Waiting for the node to become Ready."
 for _ in $(seq 1 60); do

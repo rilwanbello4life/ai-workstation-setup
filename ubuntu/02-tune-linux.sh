@@ -186,21 +186,11 @@ section "Environment"
 ensure_ai_dirs
 ok "Created $AI_ROOT/{strata,gguf,comfyui,voice,hf-cache}"
 
-profile="$HOME/.profile"
-marker="# ai-workstation-setup"
-if grep -q "$marker" "$profile" 2>/dev/null; then
-    ok "Already configured in $profile"
-else
-    cat >> "$profile" <<EOF
-
-$marker
-export AI_ROOT="$AI_ROOT"
-export HF_HOME="\$AI_ROOT/hf-cache"
-export HUGGINGFACE_HUB_CACHE="\$AI_ROOT/hf-cache/hub"
-export PATH="\$HOME/.local/bin:\$PATH"
-EOF
-    ok "Added AI_ROOT, HF_HOME and HUGGINGFACE_HUB_CACHE to $profile"
-fi
+# Writes ~/.config/ai-workstation/env.sh and sources it from both ~/.profile
+# and ~/.bashrc. It has to be both: ~/.profile covers login shells, ~/.bashrc
+# covers the terminal you open on the desktop, and only the pair of them
+# covers a reboot followed by opening a terminal.
+ensure_shell_env
 
 # ---------------------------------------------------------------------------
 section "Summary"

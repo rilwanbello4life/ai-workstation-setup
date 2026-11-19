@@ -152,7 +152,13 @@ None of this is part of a numbered phase. All of it is worth an hour.
 
 ### Make the helpers reachable from anywhere
 
-The `AI_ROOT` and `KUBECONFIG` exports live in `~/.profile`, which only applies to login shells. If you use `zsh`, or a terminal that starts non-login shells, source it explicitly from your `~/.bashrc` or `~/.zshrc`.
+The environment lives in one generated file, `~/.config/ai-workstation/env.sh`, which both `~/.profile` and `~/.bashrc` source. It sets `AI_ROOT`, `HF_HOME`, `HUGGINGFACE_HUB_CACHE`, `SRV_ROOT`, `PLATFORM_DIR`, `BACKUP_DIR`, `KUBECONFIG`, and puts `~/.local/bin` on `PATH`.
+
+Both files matter. `~/.profile` covers login shells and `ssh`; `~/.bashrc` covers the terminal you open on the desktop, which is usually a non-login shell and so reads neither `/etc/profile` nor `~/.profile`. Wiring only the first is what used to make `strata` and `hf` vanish from `PATH` the first time you opened a terminal after a reboot.
+
+`ubuntu/02-tune-linux.sh` sets this up, and [`../ubuntu/11-shell-env.sh`](../ubuntu/11-shell-env.sh) does it on its own if you need to repair or re-apply it. Earlier versions of the kit appended the exports inline to `~/.profile` from two different scripts; re-running either one migrates that automatically, keeping a timestamped backup. If you use `zsh`, add the same `source` line to `~/.zshrc` by hand.
+
+To change a path, edit `SRV_ROOT` or `AI_ROOT` and let the derived values follow. Do not hand-edit `PLATFORM_DIR`: `server/common.sh` reads it back as `${PLATFORM_DIR:-$SRV_ROOT/platform}`, so a wrong value wins silently and every server script uses the wrong directory without erroring. `./status.sh` checks for exactly that drift.
 
 ### Verify a backup actually restores
 

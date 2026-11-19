@@ -129,7 +129,7 @@ All in `/usr/local/bin/`, installed by the phase in brackets:
 | `gpu-probe` | 21 | the host JSON endpoint on 8101 |
 | `gaming-check` | 19 | Proton and anti-cheat readiness |
 
-`strata`, `hf` and `uv` install to `/home/rilwan/.local/bin`, which is on PATH in a login shell but **not** in a non-login shell — the reason `ubuntu/10-models.sh` adds it explicitly. `k3s`, `kubectl`, `crictl` and `ctr` are in `/usr/local/bin`, installed by the k3s installer.
+`strata`, `hf` and `uv` install to `/home/rilwan/.local/bin`. That directory is put on `PATH` by `/home/rilwan/.config/ai-workstation/env.sh`, the single generated file that both `~/.profile` and `~/.bashrc` source — see [the user guide](user-guide.md#make-the-helpers-reachable-from-anywhere). `ubuntu/10-models.sh` also adds it explicitly, because a script run by path is a non-interactive shell and reads neither file. `k3s`, `kubectl`, `crictl` and `ctr` are in `/usr/local/bin`, installed by the k3s installer.
 
 Not on PATH, run from the kit by path — these are the day-to-day ones, documented in [../ops/README.md](../ops/README.md):
 
@@ -167,7 +167,11 @@ User units need `systemctl --user`, and only run while you are logged in unless 
 | Path | What |
 |---|---|
 | `/home/rilwan/.kube/config` | kubectl credentials, copied from the root-only k3s file |
-| `/home/rilwan/.profile` | where `KUBECONFIG` is exported |
+| `/home/rilwan/.config/ai-workstation/env.sh` | **generated.** The one place `AI_ROOT`, `HF_HOME`, `SRV_ROOT`, `PLATFORM_DIR`, `BACKUP_DIR`, `KUBECONFIG` and `~/.local/bin` on `PATH` are defined |
+| `/home/rilwan/.profile` | sources `env.sh` — login shells and `ssh` |
+| `/home/rilwan/.bashrc` | sources `env.sh` — terminals opened on the desktop |
+| `/home/rilwan/.profile.bak-*` | the pre-migration copy, if the old inline exports were there |
+| `/var/lib/ai-pause/*.replicas` | replica counts recorded by `ai-pause`. **Survives a reboot**, which is why `ops/up.sh` checks for workloads stuck at zero |
 | `/etc/rancher/k3s/k3s.yaml` | the original k3s kubeconfig, root-only |
 | `/var/lib/rancher/k3s/` | k3s state, container images and the local-path provisioner |
 | `/var/lib/rancher/k3s/storage/` | PersistentVolume data for anything not pinned to `/srv` |

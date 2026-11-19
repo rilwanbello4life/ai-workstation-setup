@@ -52,7 +52,8 @@ ai-workstation-setup/
 │   ├── 07-strata.sh             Every Strata model this machine can run
 │   ├── 08-remote-access.sh      Tailscale and Open WebUI (optional)
 │   ├── 09-gaming.sh             Steam, Proton, GameMode, MangoHud (optional)
-│   └── 10-models.sh             ComfyUI, voice and GGUF downloads
+│   ├── 10-models.sh             ComfyUI, voice and GGUF downloads
+│   └── 11-shell-env.sh          One env file, sourced by .profile and .bashrc
 ├── server/                      Phases 12-21 — the always-on platform
 │   ├── setup-all.sh             Runs every step below, in order
 │   ├── common.sh                Shared paths and cluster helpers
@@ -75,6 +76,11 @@ ai-workstation-setup/
 │   ├── MANIFEST.md              What to download and why
 │   ├── manifest.tsv             Machine-readable download list
 │   └── download-models.{sh,ps1} Fetch and place model files
+├── ops/                         Day-to-day running, not building
+│   ├── up.sh                    After a boot: wait for k3s, undo a leftover pause
+│   ├── switch.sh                Swap the one heavy model the GPU can hold
+│   ├── down.sh                  Snapshot Postgres and stop cleanly
+│   └── README.md                What comes back by itself, and what does not
 └── reference/
     ├── user-guide.md            Living with the machine once it is built
     ├── using-the-stack.md       Per component: run it, first run, daily use

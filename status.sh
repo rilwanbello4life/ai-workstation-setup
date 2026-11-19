@@ -219,8 +219,35 @@ for d in strata gguf comfyui voice hf-cache; do
 done
 [[ -d "$AI_ROOT/strata" && -d "$AI_ROOT/gguf" && -d "$AI_ROOT/hf-cache" ]] \
     && ok "AI_ROOT layout" "$AI_ROOT"
-grep -q 'AI_ROOT' "$HOME/.profile" 2>/dev/null && ok "Shell environment" "AI_ROOT/HF_HOME in ~/.profile" \
-    || miss "Shell environment" "AI_ROOT not exported in ~/.profile"
+ENV_FILE="$HOME/.config/ai-workstation/env.sh"
+if [[ -f "$ENV_FILE" ]]; then
+    ok "Shell environment" "$ENV_FILE"
+
+    # Both files, not either: ~/.profile covers login shells, ~/.bashrc covers
+    # the terminal you open on the desktop. Missing the second one is the case
+    # that looks like a broken install after a reboot.
+    unwired=()
+    for rc in "$HOME/.profile" "$HOME/.bashrc"; do
+        # The tilde is escaped: unescaped, bash expands it in the replacement
+        # back to $HOME and the substitution becomes a no-op.
+        grep -qF 'ai-workstation/env.sh' "$rc" 2>/dev/null || unwired+=("${rc/#$HOME/\~}")
+    done
+    (( ${#unwired[@]} )) \
+        && bad "Shell env sourcing" "not sourced from ${unwired[*]} - run ubuntu/11-shell-env.sh" \
+        || ok "Shell env sourcing" "~/.profile and ~/.bashrc"
+
+    # PLATFORM_DIR is read back by server/common.sh as "${PLATFORM_DIR:-...}",
+    # so a wrong value in the environment wins silently instead of failing.
+    env_pd="$(env -i HOME="$HOME" bash -c ". '$ENV_FILE' 2>/dev/null; echo \"\$PLATFORM_DIR\"" 2>/dev/null)"
+    env_sr="$(env -i HOME="$HOME" bash -c ". '$ENV_FILE' 2>/dev/null; echo \"\$SRV_ROOT\"" 2>/dev/null)"
+    if [[ -n "$env_pd" && "$env_pd" != "$env_sr/platform" ]]; then
+        bad "PLATFORM_DIR" "$env_pd does not match \$SRV_ROOT/platform ($env_sr/platform)"
+    fi
+elif grep -q 'AI_ROOT' "$HOME/.profile" 2>/dev/null; then
+    bad "Shell environment" "old inline ~/.profile block - run ubuntu/11-shell-env.sh to migrate"
+else
+    miss "Shell environment" "not configured - run ubuntu/11-shell-env.sh"
+fi
 
 # =========================================================================
 sec "Phase 8.3 - Python and CUDA toolchain"

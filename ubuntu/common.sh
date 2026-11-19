@@ -148,3 +148,143 @@ add_nvidia_repo() {
     fi
     rm -rf "$tmp"
 }
+
+# ---------------------------------------------------------------------------
+# One file owns the interactive shell environment, and both ~/.profile and
+# ~/.bashrc source it.
+#
+# This kit used to append the exports straight into ~/.profile from two
+# different scripts. The problem is that ~/.profile is read by *login* shells
+# only. A terminal opened on the desktop is normally a non-login interactive
+# shell, which reads ~/.bashrc instead - so after a reboot `strata` and `hf`
+# were missing from PATH and AI_ROOT was empty, in exactly the window where
+# you would notice and assume the install was broken.
+SHELL_ENV_VERSION=1
+SHELL_ENV_FILE="${SHELL_ENV_FILE:-$HOME/.config/ai-workstation/env.sh}"
+
+_write_env_file() {
+    local tmp="$1"
+    printf '# ai-workstation-setup shell environment (v%s) - generated, do not edit.\n' \
+        "$SHELL_ENV_VERSION" > "$tmp"
+    cat >> "$tmp" <<'ENVEOF'
+# Sourced by ~/.profile (login shells) and ~/.bashrc (desktop terminals).
+# Re-running any setup script rewrites this file. To override a path, export
+# it in ~/.bashrc ABOVE the source line: every value below falls back only
+# when the variable is already unset.
+
+export AI_ROOT="${AI_ROOT:-$HOME/ai}"
+export APPS="${APPS:-$HOME/apps}"
+export HF_HOME="${HF_HOME:-$AI_ROOT/hf-cache}"
+export HUGGINGFACE_HUB_CACHE="${HUGGINGFACE_HUB_CACHE:-$AI_ROOT/hf-cache/hub}"
+
+# Derived exactly the way server/common.sh derives them, so the shell and the
+# scripts cannot disagree. Note that server/common.sh reads PLATFORM_DIR back
+# as "${PLATFORM_DIR:-$SRV_ROOT/platform}", which means a wrong value here
+# wins silently: every server script would create and look for platform state
+# in the wrong directory without erroring. Change SRV_ROOT and let the other
+# two follow rather than editing them individually.
+export SRV_ROOT="${SRV_ROOT:-/srv}"
+export PLATFORM_DIR="${PLATFORM_DIR:-$SRV_ROOT/platform}"
+export BACKUP_DIR="${BACKUP_DIR:-$SRV_ROOT/backups}"
+
+# k3s writes a root-only kubeconfig; server/02-k3s.sh copies it here.
+export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
+
+# strata, hf and uv install here. The guard matters because ~/.bashrc is
+# re-read by every nested shell and every tmux pane, and an unguarded prepend
+# grows PATH without bound.
+case ":$PATH:" in
+    *":$HOME/.local/bin:"*) ;;
+    *) export PATH="$HOME/.local/bin:$PATH" ;;
+esac
+
+# K8S_DIR is deliberately not set here. server/common.sh derives it from
+# BASH_SOURCE so it always points at the k8s directory beside the script that
+# is running. A fixed value would go stale the moment the repo is moved or
+# cloned elsewhere - and would be ignored anyway, because that assignment has
+# no :- fallback.
+ENVEOF
+}
+
+# Remove an older inline block so there is exactly one definition. Both of
+# them had a stable marker and ran to the next blank line, which is what this
+# matches. Backing up is the caller's job: this gets called twice against the
+# same file, so a backup here would overwrite the first with an already
+# half-stripped copy and leave nothing to restore from.
+_strip_legacy_env_block() {
+    local file="$1" marker="$2" tmp
+    [[ -f "$file" ]] || return 0
+    grep -qF "$marker" "$file" 2>/dev/null || return 0
+
+    tmp="$(mktemp)"
+    awk -v marker="$marker" '
+        index($0, marker) == 1 { skipping = 1; next }
+        skipping && /^[[:space:]]*$/ { skipping = 0; next }
+        skipping && /^export / { next }
+        { skipping = 0; print }
+    ' "$file" > "$tmp"
+
+    cat "$tmp" > "$file"
+    rm -f "$tmp"
+}
+
+# Make $rcfile source the env file, exactly once.
+_link_env_file() {
+    local rcfile="$1" ref="$SHELL_ENV_FILE"
+    local marker="# ai-workstation-setup environment"
+
+    [[ -f "$rcfile" ]] || touch "$rcfile"
+    if grep -qF "$marker" "$rcfile" 2>/dev/null; then
+        return 1
+    fi
+
+    # Write $HOME rather than the expanded path, so the line stays correct if
+    # the home directory is ever mounted somewhere else.
+    [[ "$ref" == "$HOME/"* ]] && ref="\$HOME/${ref#"$HOME/"}"
+
+    cat >> "$rcfile" <<EOF
+
+$marker
+[ -f "$ref" ] && . "$ref"
+EOF
+    return 0
+}
+
+ensure_shell_env() {
+    local tmp
+    mkdir -p "$(dirname "$SHELL_ENV_FILE")"
+
+    tmp="$(mktemp)"
+    _write_env_file "$tmp"
+
+    if [[ -f "$SHELL_ENV_FILE" ]] && cmp -s "$tmp" "$SHELL_ENV_FILE"; then
+        ok "Shell environment already current: $SHELL_ENV_FILE"
+    else
+        cat "$tmp" > "$SHELL_ENV_FILE"
+        ok "Wrote $SHELL_ENV_FILE"
+    fi
+    rm -f "$tmp"
+
+    # One backup of the original, taken before either block is touched.
+    local legacy="$HOME/.profile" backup
+    if [[ -f "$legacy" ]] && grep -qE '^# (ai-workstation-setup$|k3s cluster access)' "$legacy" 2>/dev/null; then
+        backup="$legacy.bak-$(date +%Y%m%d-%H%M%S)"
+        cp "$legacy" "$backup"
+        _strip_legacy_env_block "$legacy" "# ai-workstation-setup"
+        _strip_legacy_env_block "$legacy" "# k3s cluster access"
+        ok "Migrated the old inline exports out of ~/.profile"
+        info "Original saved as ${backup/#$HOME/\~}"
+    fi
+
+    local wired=()
+    _link_env_file "$HOME/.profile" && wired+=("~/.profile")
+    _link_env_file "$HOME/.bashrc"  && wired+=("~/.bashrc")
+
+    if (( ${#wired[@]} )); then
+        ok "Sourced from ${wired[*]}"
+    else
+        ok "Already sourced from ~/.profile and ~/.bashrc"
+    fi
+
+    info "Open a new terminal, or run: . $SHELL_ENV_FILE"
+}
