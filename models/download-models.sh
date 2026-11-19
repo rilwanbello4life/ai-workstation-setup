@@ -10,7 +10,9 @@
 set -euo pipefail
 
 GROUP="${1:-image}"
-AI_ROOT="${2:-${AI_ROOT:-$HOME/ai}}"
+# shellcheck source=/dev/null
+[[ -r "$HOME/.config/ai-workstation/paths.sh" ]] && source "$HOME/.config/ai-workstation/paths.sh"
+AI_ROOT="${2:-${AI_ROOT:-${AI_HOME:-$HOME/ai}}}"
 MANIFEST="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/manifest.tsv"
 
 bold()  { printf '\033[1m%s\033[0m\n' "$*"; }

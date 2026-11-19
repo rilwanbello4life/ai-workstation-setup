@@ -6,10 +6,29 @@ set -euo pipefail
 # This machine is one of two fully independent systems. Nothing is shared with
 # the Windows install on the other drive, so every path here is local ext4.
 #
-#   AI_ROOT  models and generated output
-#   APPS     application checkouts and virtualenvs
-export AI_ROOT="${AI_ROOT:-$HOME/ai}"
+#   AI_HOME   everything AI, the one directory to back up or move
+#   AI_ROOT   models and weights
+#   APPS      application checkouts and virtualenvs
+#   AI_OUTPUT generated images and video
+#
+# A machine that has been through ops/reorganise-home.sh records its chosen
+# roots in the file below, and it is read before the defaults so the new
+# layout applies everywhere at once.
+#
+# The defaults themselves are deliberately unchanged from the original
+# layout. That is what makes pulling this file safe mid-download: on a
+# machine that has not been reorganised there is no paths.sh, nothing moves
+# under a running job, and the ledger stays where the running job is writing
+# it. The migration script is the only thing that switches layouts, and it
+# refuses to run while a download is in progress.
+AI_PATHS_FILE="${AI_PATHS_FILE:-$HOME/.config/ai-workstation/paths.sh}"
+# shellcheck source=/dev/null
+[[ -r "$AI_PATHS_FILE" ]] && source "$AI_PATHS_FILE"
+
+export AI_HOME="${AI_HOME:-$HOME/ai}"
+export AI_ROOT="${AI_ROOT:-$AI_HOME}"
 export APPS="${APPS:-$HOME/apps}"
+export AI_OUTPUT="${AI_OUTPUT:-$AI_ROOT/comfyui/output}"
 
 # RTX 5070 Ti is Blackwell: compute capability 12.0.
 export CUDA_ARCH="${CUDA_ARCH:-120}"
@@ -159,7 +178,7 @@ add_nvidia_repo() {
 # shell, which reads ~/.bashrc instead - so after a reboot `strata` and `hf`
 # were missing from PATH and AI_ROOT was empty, in exactly the window where
 # you would notice and assume the install was broken.
-SHELL_ENV_VERSION=1
+SHELL_ENV_VERSION=2
 SHELL_ENV_FILE="${SHELL_ENV_FILE:-$HOME/.config/ai-workstation/env.sh}"
 
 _write_env_file() {
@@ -168,14 +187,20 @@ _write_env_file() {
         "$SHELL_ENV_VERSION" > "$tmp"
     cat >> "$tmp" <<'ENVEOF'
 # Sourced by ~/.profile (login shells) and ~/.bashrc (desktop terminals).
-# Re-running any setup script rewrites this file. To override a path, export
-# it in ~/.bashrc ABOVE the source line: every value below falls back only
-# when the variable is already unset.
+# Re-running any setup script rewrites this file, so do not edit it. To
+# change where things live, edit paths.sh beside it - that one is yours and
+# is never regenerated. Every value below falls back only when the variable
+# is already unset, so whatever paths.sh sets wins.
 
-export AI_ROOT="${AI_ROOT:-$HOME/ai}"
+# shellcheck source=/dev/null
+[[ -r "$HOME/.config/ai-workstation/paths.sh" ]] && source "$HOME/.config/ai-workstation/paths.sh"
+
+export AI_HOME="${AI_HOME:-$HOME/ai}"
+export AI_ROOT="${AI_ROOT:-$AI_HOME}"
 export APPS="${APPS:-$HOME/apps}"
+export AI_OUTPUT="${AI_OUTPUT:-$AI_ROOT/comfyui/output}"
 export HF_HOME="${HF_HOME:-$AI_ROOT/hf-cache}"
-export HUGGINGFACE_HUB_CACHE="${HUGGINGFACE_HUB_CACHE:-$AI_ROOT/hf-cache/hub}"
+export HUGGINGFACE_HUB_CACHE="${HUGGINGFACE_HUB_CACHE:-$HF_HOME/hub}"
 
 # Derived exactly the way server/common.sh derives them, so the shell and the
 # scripts cannot disagree. Note that server/common.sh reads PLATFORM_DIR back

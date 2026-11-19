@@ -21,7 +21,14 @@
 # NOTE: no 'set -e'. Most checks here are expected to fail on a partial build.
 set -uo pipefail
 
-AI_ROOT="${AI_ROOT:-$HOME/ai}"
+# Written by ops/reorganise-home.sh. Read here too, because this script is
+# standalone and does not source ubuntu/common.sh - without it the report
+# would describe the layout the machine had before it was reorganised.
+# shellcheck source=/dev/null
+[[ -r "$HOME/.config/ai-workstation/paths.sh" ]] && source "$HOME/.config/ai-workstation/paths.sh"
+
+AI_HOME="${AI_HOME:-$HOME/ai}"
+AI_ROOT="${AI_ROOT:-$AI_HOME}"
 APPS="${APPS:-$HOME/apps}"
 
 OK=0; MISS=0; BAD=0
