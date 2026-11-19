@@ -203,8 +203,10 @@ fi
 # until the DIMMs are in. This warns and continues; it does not block, since
 # pre-downloading before the RAM arrives is the normal reason to be here.
 if [[ "$TIERS" == *f* ]] && (( ram_gb < 90 )); then
-    warn "Tier F (UD-IQ4_XS, ~111 GB) needs ~96 GB of RAM; this machine reports ${ram_gb} GB."
-    warn "It will download and install, but cannot load until phase 11 is fitted."
+    warn "Tier F (UD-IQ4_XS, ~111 GB) needs ~72 GB of RAM; this machine reports ${ram_gb} GB."
+    warn "The download will complete and is kept. The verify step that follows"
+    warn "it will then be killed for running out of memory - that is expected"
+    warn "here, and is reported as a failure at the end rather than hidden."
     warn "Use --tier abcde to leave it out."
 fi
 
@@ -214,8 +216,10 @@ fi
 # this warns rather than blocks, exactly as tier F does.
 if [[ "$TIERS" == *g* ]]; then
     if (( ram_gb < 90 )); then
-        warn "Tier G (UD-Q4_K_XL and NVFP4, ~210 GB) needs ~96 GB; this machine reports ${ram_gb} GB."
-        warn "Both will download, but neither can load until phase 11 is fitted."
+        warn "Tier G (UD-Q4_K_XL and NVFP4, ~210 GB) needs 80-88 GB; this machine reports ${ram_gb} GB."
+        warn "Both will download and the downloads are kept, but the verify step"
+        warn "after each one will be killed for running out of memory until the"
+        warn "memory upgrade is fitted."
     fi
     warn "Tier G does not load with the cluster running, at any memory size."
     warn "Stop it first with 'ai-pause --cluster', then launch the pack."
@@ -374,7 +378,40 @@ cat <<EOF
 
   Downloads resume if interrupted. Re-running skips what is already present.
 
+  Run this from a plain console or tmux, not from an editor's built-in
+  terminal. The load step is what exhausts memory, and an editor is usually
+  the largest thing on the machine for the kernel to kill - which also kills
+  the download, because the terminal is its parent.
+
 EOF
+
+# Confine the load step to its own memory cgroup.
+#
+# Strata downloads a pack and then loads it, and 02-tune-linux.sh grants
+# memlock unlimited so it can pin expert tensors. Pinned pages cannot be
+# reclaimed, so when a pack is larger than RAM the kernel cannot take the
+# memory back from Strata - it kills the next largest thing instead, which on
+# a desktop is the editor or the browser, not the process at fault.
+#
+# A scope with MemoryMax reverses that: the kill lands on Strata. The pack is
+# already fully downloaded by then, so the bytes are kept and a later run
+# after the memory upgrade just loads them. The cap is generous on purpose -
+# on a 96 GB machine it never binds, and it is only the small-memory case it
+# is protecting.
+MEM_GUARD=()
+if (( ram_gb > 12 )) && have systemd-run; then
+    # User scopes only accept MemoryMax where systemd delegates the memory
+    # controller. Probe rather than assume: without delegation the flag is
+    # rejected and every launch below would fail for the wrong reason.
+    if systemd-run --user --scope --quiet -p MemoryMax=1G true >/dev/null 2>&1; then
+        MEM_GUARD=(systemd-run --user --scope --quiet
+                   -p MemoryMax="$(( ram_gb - 6 ))G" --)
+        info "Loads are capped at $(( ram_gb - 6 )) GB so an overrun kills Strata, not your session."
+    else
+        warn "systemd cannot cap memory for user scopes here."
+        warn "A pack larger than RAM may get your desktop killed instead of Strata."
+    fi
+fi
 
 installed=()
 failed=()
@@ -393,14 +430,29 @@ for entry in "${selected[@]}"; do
 
     # --yes skips prompts, --no-tui serves and returns instead of opening the
     # monitor, --save-preset makes switching to it a one-liner later.
-    if strata launch --family "$fam" --model "$mod" \
+    if "${MEM_GUARD[@]}" strata launch --family "$fam" --model "$mod" \
                      --yes --no-tui --save-preset "$preset"; then
         ok "${fam}/${mod} installed and serving."
-        strata launch --stop >/dev/null 2>&1 || true
-        info "Stopped; VRAM released."
+
+        # Checked, not assumed. This used to discard the result and print
+        # "Stopped" either way, so a stop that failed left the pack resident
+        # and the next one loaded on top of it - on a machine that usually
+        # has room for exactly one.
+        if strata launch --stop >/dev/null 2>&1; then
+            info "Stopped; memory and VRAM released."
+        else
+            warn "Could not confirm Strata stopped. Check 'strata launch --status'."
+            warn "If it is still serving, the next pack will load on top of it."
+        fi
         installed+=("$preset")
     else
-        err "${fam}/${mod} failed."
+        # Expected on a machine too small for this pack: the download finished
+        # and only the load step was killed, so nothing has to be re-fetched.
+        err "${fam}/${mod} failed to load."
+        if (( ram_gb < 42 )); then
+            info "On ${ram_gb} GB this is normal for the larger packs. The download is"
+            info "kept - re-run after the memory upgrade and it will only load."
+        fi
         warn "Retry on its own:  strata launch --family $fam --model $mod"
         failed+=("$fam/$mod")
     fi

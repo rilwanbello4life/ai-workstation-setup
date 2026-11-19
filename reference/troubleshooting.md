@@ -182,6 +182,23 @@ Check `ulimit -l` on Linux. Strata pins 25–30 GB and Ubuntu's default memlock 
 **Download keeps failing partway.**
 It resumes. Re-run the same `strata launch` and it continues from where it stopped rather than restarting the download.
 
+**My editor or browser gets killed while `07-strata.sh` is "downloading".**
+It is not the download. `strata launch` downloads a pack and then *loads* it, and `02-tune-linux.sh` grants `memlock unlimited` so Strata can pin expert tensors. Pinned pages cannot be reclaimed, so when a pack is bigger than RAM the kernel cannot take the memory back from Strata — it kills the largest reclaimable process instead, which on a desktop is your editor. The process at fault survives and the innocent one dies.
+
+Two things follow. **Run the installer from a plain console or `tmux`, never an editor's built-in terminal** — the terminal is the download's parent, so killing the editor kills the download too, which is why it looks like the download keeps failing. And `07-strata.sh` now runs each load inside `systemd-run --user --scope -p MemoryMax=`, set to RAM minus 6 GB, so an overrun kills Strata rather than your session. On a 96 GB machine that cap never binds.
+
+Distinguish the two failure modes before changing anything:
+
+```sh
+journalctl -k --since -1d | grep -iE 'oom|killed process'   # kernel killed it
+journalctl --user -u systemd-oomd --since -1d | tail        # systemd-oomd killed it
+```
+
+If instead the editor *reloads its own window* and says `JavaScript heap out of memory`, that is the editor's renderer, not the system — the progress-bar output fills its terminal scrollback. Lower the scrollback limit or, again, do not run the installer in it.
+
+**I am on 32 GB and want to pre-download the 96 GB packs anyway.**
+That is supported, with one caveat worth knowing: Strata has no download-only mode. `strata launch --plan` previews without downloading, and `strata models` only inspects — fetching happens as part of a real launch. So the pack downloads in full, the load that follows is killed, and the run reports a failure at the end. **The download is kept**, so after fitting the memory the same command only loads. Tiers F and G warn about exactly this before starting.
+
 **Switching models says a model is already running.**
 Only one serves at a time. Run `strata launch --stop` first, or add `--restart` to the new launch. Under `--no-tui` it refuses rather than prompting.
 
