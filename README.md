@@ -172,6 +172,8 @@ To find out where you are, or what a half-finished build is missing, run the aud
 
 Markers are `[ok]` present and correct, `[--]` not done yet, `[!!]` done but wrong — look at those first — and `[??]` needs sudo to tell.
 
+The numbered phases build the machine and are run once. The scripts in [ops/](ops/README.md) are the ones you run forever after: `ops/up.sh` after every boot, `ops/switch.sh` to change which model holds the GPU, and `ops/down.sh` before a planned shutdown. Most of the stack is enabled systemd units and comes back on its own, so `up.sh` is mostly verification — it exists for the parts that do not, chiefly a leftover `ai-pause`, whose recorded replica counts survive a reboot and otherwise leave you staring at a healthy, completely empty cluster.
+
 ## The non-negotiable safety rules
 
 Read these before touching anything. They are the difference between two working systems and a bricked new PC.
@@ -218,6 +220,8 @@ The five recommendations you collected are one stack, not five alternatives.
 | `ai-status` | Memory, VRAM, which model ports are live, what the cluster is running |
 | `ai-pause` | Frees the platform's ~15 GB for a larger model or a game |
 | `ai-resume` | Restores exactly what was running before |
+
+After a reboot, `./ops/up.sh` wraps all three: it waits for the cluster, undoes a pause that was still in effect when the machine went down, and tells you which model servers are not running and why.
 
 ### Which side to run what on
 

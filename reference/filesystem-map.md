@@ -131,6 +131,14 @@ All in `/usr/local/bin/`, installed by the phase in brackets:
 
 `strata`, `hf` and `uv` install to `/home/rilwan/.local/bin`, which is on PATH in a login shell but **not** in a non-login shell — the reason `ubuntu/10-models.sh` adds it explicitly. `k3s`, `kubectl`, `crictl` and `ctr` are in `/usr/local/bin`, installed by the k3s installer.
 
+Not on PATH, run from the kit by path — these are the day-to-day ones, documented in [../ops/README.md](../ops/README.md):
+
+| Script | Does |
+|---|---|
+| `ops/up.sh` | after a boot: wait for k3s, undo a leftover pause, report what is not running |
+| `ops/switch.sh` | swap the one heavy workload the 16 GB card can hold |
+| `ops/down.sh` | snapshot Postgres and stop the cluster cleanly before a shutdown |
+
 ## systemd units
 
 System-wide, in `/etc/systemd/system/`:
