@@ -53,6 +53,30 @@ require_not_root() {
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
+# Free and total space in GB on the filesystem holding a path.
+#
+# These exist because `df -BG --output=avail` is GNU-only, and the obvious
+# spelling of it is a trap under `set -euo pipefail`: when df rejects the
+# flags the command substitution fails, the assignment inherits that status,
+# and the script exits before reaching the "${x:-0}" fallback on the next
+# line. With 2>/dev/null on the df it exits silently, printing the section
+# heading and nothing else. `df -Pk` is POSIX and works everywhere, and the
+# `|| true` means a path that cannot be stated reports 0 rather than killing
+# the caller - a disk check should never be the thing that stops an install.
+disk_avail_gb() {
+    local blocks
+    blocks="$(df -Pk "${1:-.}" 2>/dev/null | awk 'NR==2 {print $4}')" || true
+    [[ "$blocks" =~ ^[0-9]+$ ]] || { echo 0; return 0; }
+    echo $(( blocks / 1024 / 1024 ))
+}
+
+disk_size_gb() {
+    local blocks
+    blocks="$(df -Pk "${1:-.}" 2>/dev/null | awk 'NR==2 {print $2}')" || true
+    [[ "$blocks" =~ ^[0-9]+$ ]] || { echo 0; return 0; }
+    echo $(( blocks / 1024 / 1024 ))
+}
+
 # Create the AI_ROOT layout. Mirrors C:\AI on the Windows side so both systems
 # are navigable the same way, despite sharing nothing.
 ensure_ai_dirs() {

@@ -12,8 +12,8 @@ One box, two operating systems, on two separate drives. They share no filesystem
 |---|---|---|
 | For | Gaming, and AI when you are already in Windows | AI work, and the always-on server |
 | AI stack | Complete | Complete, plus the cluster |
-| Models | Coder + Qwen3.6, ~91 GB | The entire catalogue, ~788 GB |
-| Games | ~690 GB | ~431 GB, minus anti-cheat titles |
+| Models | Coder + Qwen3.6, ~91 GB | The entire catalogue, ~998 GB |
+| Games | ~690 GB | ~221 GB, minus anti-cheat titles |
 | Runs when you are away | No | Yes |
 
 Pick which one boots with **F8** at power-on.
@@ -182,7 +182,7 @@ VS Code is Electron, and Electron's GPU process and CUDA workloads coexist badly
 
 ### Keep an eye on the disk
 
-The catalogue through tier F is budgeted at 788 GB, and that already includes UD-IQ4_XS. What is still unbudgeted is UD-Q4_K_XL at a further 130 GB, and NVFP4, which publishes no size at all. Check before downloading either:
+`--tier all` is 998 GB and includes everything this machine can run: tiers A-F at 788 GB plus tier G, which is UD-Q4_K_XL at 130 GB and NVFP4 at an estimated 80 GB. The only pack left out entirely is DeepSeek V4.1-Flash, at 257 GB for about 5 tok/s. Check the space before adding anything beyond this:
 
 ```bash
 df -h /

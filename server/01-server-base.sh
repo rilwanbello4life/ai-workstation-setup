@@ -55,10 +55,8 @@ else
     fi
 fi
 
-avail="$(df -BG --output=avail / 2>/dev/null | tail -n1 | tr -dc '0-9')"
-avail="${avail:-0}"
-size="$(df -BG --output=size / 2>/dev/null | tail -n1 | tr -dc '0-9')"
-size="${size:-0}"
+avail="$(disk_avail_gb /)"
+size="$(disk_size_gb /)"
 info "Free space on /: ${avail} GB of ${size} GB"
 
 # Settled size of the platform: k3s container images, Postgres, n8n execution

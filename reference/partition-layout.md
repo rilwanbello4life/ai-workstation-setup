@@ -90,6 +90,7 @@ A 2 TB drive formats to roughly **1 863 GiB**. The AI stack is installed in full
 | Ubuntu, desktop and applications | ~50 GB |
 | **Strata, tiers A-E** | **~677 GB** |
 | **Strata, tier F — UD-IQ4_XS** | **~111 GB** |
+| **Strata, tier G — UD-Q4_K_XL + NVFP4** | **~210 GB** |
 | ComfyUI image models | 20 GB |
 | ComfyUI video models | 55 GB |
 | GGUF chat models | 30 GB |
@@ -98,15 +99,15 @@ A 2 TB drive formats to roughly **1 863 GiB**. The AI stack is installed in full
 | Postgres, n8n and app volumes | ~50 GB |
 | Game-server worlds | ~100 GB |
 | Local backups under `/srv/backups` | ~100 GB |
-| **Total** | **~1 246 GB** |
+| **Total** | **~1 456 GB** |
 
-Against 1 863 GiB that leaves **617 GB**. Hold back **186 GB** as permanent free space — the reason is the next bullet list — and roughly **431 GB remains for a Steam library**.
+Against 1 863 GiB that leaves **617 GB**. Hold back **186 GB** as permanent free space — the reason is the next bullet list — and roughly **431 GB remains for a Steam library**. Taking tier G as well, which is what `--tier all` now does, spends a further 210 GB and brings that down to about **221 GB**.
 
 That Steam figure was 542 GB before tier F was added to the default install. Taking UD-IQ4_XS is a deliberate trade of about two modern titles for the best pack the 96 GB configuration can hold with the cluster running. Drop back with `./07-strata.sh --tier abcde --install`.
 
 So the ordering is: the entire AI stack, then the cluster and backups, then games with whatever is left. That is enough for six to eight modern titles installed simultaneously, and it is the only place the smaller drive costs you anything.
 
-**Memory, not disk, is still what limits which models you can run.** With the server platform up, the largest pack that fits in RAM is IQ2_XS at 64 GB or UD-IQ4_XS at 96 GB; anything above needs `ai-pause --cluster` first. Having all of them on disk means switching is a one-liner rather than a download, which is exactly why installing the full catalogue is worth the 788 GB.
+**Memory, not disk, is still what limits which models you can run.** With the server platform up, the largest pack that fits in RAM is IQ2_XS at 64 GB or UD-IQ4_XS at 96 GB; anything above needs `ai-pause --cluster` first. Having all of them on disk means switching is a one-liner rather than a download, which is exactly why installing the full catalogue is worth the 998 GB.
 
 The remaining 96 GB packs stay outside the budget. NVFP4 and UD-Q4_K_XL are deliberately excluded from `--tier all`: UD-Q4_K_XL is another 130 GB, NVFP4 publishes no download size, and taking either on top of tier F overruns the Steam allocation outright. One of them is affordable only by giving up games entirely. See [4tb-upgrade.md](4tb-upgrade.md).
 

@@ -20,15 +20,26 @@
 #   D  needs 64 GB RAM      Q2_0, IQ2_XS, IQ3_XXS, Swift, Q8_0    ~326 GB
 #   E  needs 64 GB, tight   IQ3_S                                  ~76 GB
 #   F  needs 96 GB          UD-IQ4_XS                             ~111 GB
+#   G  96 GB + 'ai-pause'    UD-Q4_K_XL, NVFP4                     ~210 GB
 #
-# Tier F exists only in the 96 GB "add" configuration from phase 11. It is in
-# the table rather than fetched by hand because at 96 GB it is the best pack
-# that still loads with the cluster running.
+# Tiers F and G exist only in the 96 GB "add" configuration from phase 11.
+# F is the best pack that still loads with the cluster running; G needs the
+# cluster stopped with 'ai-pause' first, which is why it is a separate letter
+# rather than more of F.
 #
-# NVFP4 and UD-Q4_K_XL stay out of the tier system deliberately. Taking both
-# F-class packs overruns the drive, and NVFP4 publishes no download size to
-# guard against - so these two remain a manual, deliberate choice. See
-# reference/strata-models.md.
+# '--tier all' is now all seven letters, about 998 GB, which is everything
+# this machine can run. That leaves roughly 220 GB for a Steam library on the
+# 2 TB drive - the trade is deliberate and documented in
+# reference/partition-layout.md. Use '--tier abcdef' to stop at 788 GB.
+#
+# NVFP4's download size is not published; the 80 GB in the table is an
+# estimate used for the disk guard. Confirm the exact pack names on your
+# install with 'strata models list' before relying on tier G.
+#
+# Deliberately absent at any tier: DeepSeek V4.1-Flash. It runs - memory is
+# not the problem - but it is 257 GB for about 5 tok/s with an 8K context
+# cap, and it does not fit alongside tier G on a 2 TB drive. See
+# reference/4tb-upgrade.md.
 #
 # Prints a plan and changes nothing unless you pass --install.
 #
@@ -52,10 +63,11 @@ Usage:
   ./07-strata.sh --tier a --install   download and install tier A
   ./07-strata.sh --tier de --install  after the phase 11 memory upgrade
   ./07-strata.sh --tier f --install   the 96 GB pack, on four DIMMs only
+  ./07-strata.sh --tier g --install   the two that also need 'ai-pause'
   ./07-strata.sh --tier all --install everything this machine allows
 
 Options:
-  --tier LETTERS   any combination of a b c d e f, or "all"  (default: a)
+  --tier LETTERS   any combination of a b c d e f g, or "all"  (default: a)
   --install        actually download, instead of printing the plan
   -y, --yes        do not ask before each model
 
@@ -72,9 +84,9 @@ while (( $# )); do
     esac
 done
 TIERS="$(tr '[:upper:]' '[:lower:]' <<<"$TIERS")"
-if [[ "$TIERS" == "all" ]]; then TIERS="abcdef"; fi
+if [[ "$TIERS" == "all" ]]; then TIERS="abcdefg"; fi
 # Without this, --tier bogus silently matches tier B.
-[[ "$TIERS" =~ ^[abcdef]+$ ]] || die "Tier must be letters a-f, or 'all'. Got: $TIERS"
+[[ "$TIERS" =~ ^[abcdefg]+$ ]] || die "Tier must be letters a-g, or 'all'. Got: $TIERS"
 
 # A model's tier field may hold several letters - Q2_0 and IQ2_XS are both
 # "usable now but SSD-bound" (C) and "first-class after the upgrade" (D).
@@ -111,10 +123,8 @@ fi
 (( ram_gb >= 30 )) || die "Strata needs a 32 GB machine; this one reports ${ram_gb} GB usable."
 
 ensure_ai_dirs
-avail_gb="$(df -BG --output=avail "$AI_ROOT" 2>/dev/null | tail -n1 | tr -dc '0-9')"
-avail_gb="${avail_gb:-0}"
-size_gb="$(df -BG --output=size "$AI_ROOT" 2>/dev/null | tail -n1 | tr -dc '0-9')"
-size_gb="${size_gb:-0}"
+avail_gb="$(disk_avail_gb "$AI_ROOT")"
+size_gb="$(disk_size_gb "$AI_ROOT")"
 
 # A DRAM-less NVMe shrinks its SLC write cache as the drive fills, so the last
 # tenth of the disk costs sustained write speed, not just comfort. On a 2 TB
@@ -152,6 +162,8 @@ MODELS=(
     "qwen36|Q8_0|d|38|Qwen3.6 8-bit - closest to the full 35B"
     "qwen|iq3_s|e|76|Flash-Next IQ3_S - 50 GB of experts, 53 tok/s"
     "qwen|UD-IQ4_XS|f|111|Unsloth UD-IQ4_XS - 62 GB of experts, 96 GB only"
+    "qwen|UD-Q4_K_XL|g|130|Unsloth UD-Q4_K_XL - 78 GB of experts, needs ai-pause"
+    "qwen|NVFP4|g|80|NVFP4 - 70 GB of experts, FP4 tensor cores; size estimated"
 )
 
 selected=()
@@ -194,6 +206,20 @@ if [[ "$TIERS" == *f* ]] && (( ram_gb < 90 )); then
     warn "Tier F (UD-IQ4_XS, ~111 GB) needs ~96 GB of RAM; this machine reports ${ram_gb} GB."
     warn "It will download and install, but cannot load until phase 11 is fitted."
     warn "Use --tier abcde to leave it out."
+fi
+
+# Tier G is the same argument one step further out: 96 GB is necessary but not
+# sufficient, because these two only fit once the platform's ~15 GB is gone.
+# Downloading them early is still the right call - they are fetched once - so
+# this warns rather than blocks, exactly as tier F does.
+if [[ "$TIERS" == *g* ]]; then
+    if (( ram_gb < 90 )); then
+        warn "Tier G (UD-Q4_K_XL and NVFP4, ~210 GB) needs ~96 GB; this machine reports ${ram_gb} GB."
+        warn "Both will download, but neither can load until phase 11 is fitted."
+    fi
+    warn "Tier G does not load with the cluster running, at any memory size."
+    warn "Stop it first with 'ai-pause --cluster', then launch the pack."
+    warn "NVFP4's download size is an estimate; check 'strata models list' if it fails."
 fi
 
 # ---------------------------------------------------------------------------
@@ -260,23 +286,27 @@ else
   ranks are the least forgiving thing AM5 does, and marginal memory corrupts
   data quietly rather than failing visibly.
 
-  Tiers A-E are ~677 GB and budgeted for on this drive. Tier F adds the one
-  pack that only this memory configuration reaches:
+  Tiers A-E are ~677 GB. Three more packs need this memory configuration,
+  and all three are now installed by '--tier all':
 
-    UD-IQ4_XS   ~62 GB experts, ~111 GB download  - cluster up, 6 GB margin
+    F  UD-IQ4_XS   ~62 GB experts, ~111 GB download  - cluster up, 6 GB margin
+    G  UD-Q4_K_XL  ~78 GB experts, ~130 GB download  - after 'ai-pause'
+    G  NVFP4       ~70 GB experts, ~80 GB estimated  - after 'ai-pause'
 
-  '--tier all' now means A-F, ~788 GB, which leaves roughly 431 GB for the
-  Steam library instead of 542 GB. That trade is the reason it is called out
-  here rather than buried in the total.
+  F and G differ only in whether the platform has to be stopped first. At
+  96 GB, tier F loads alongside the cluster; tier G needs its ~15 GB back.
 
-  Two more packs reach this tier and are deliberately not in '--tier all':
+  '--tier all' is therefore ~998 GB, every pack this machine can execute.
+  That leaves roughly 221 GB for the Steam library instead of 542 GB, which
+  is a real trade and the reason it is spelled out here rather than buried
+  in the total. '--tier abcdef' stops at 788 GB and keeps 431 GB of games.
 
-    NVFP4       ~70 GB experts                    - after 'ai-pause'
-    UD-Q4_K_XL  ~78 GB experts, ~130 GB download  - after 'ai-pause'
+  NVFP4 publishes no download size; the 80 GB above is an estimate for the
+  disk guard. Check 'strata models list' if the install cannot find it.
 
-  Disk, not memory, is the constraint up here: A-F plus either of those
-  overruns the Steam allocation entirely. Take one only if you have decided
-  what it displaces, or see reference/4tb-upgrade.md.
+  Not included at any tier: DeepSeek V4.1-Flash. Memory is not the problem -
+  it is 257 GB for about 5 tok/s with an 8K context cap, and it no longer
+  fits beside tier G on this drive. See reference/4tb-upgrade.md.
 
   Still out of reach: Qwen3.6 Q8_0 class at ~136 GB. DeepSeek V4.1-Flash fits
   in memory but measures ~5 tok/s on this card and wants 257 GB of disk.

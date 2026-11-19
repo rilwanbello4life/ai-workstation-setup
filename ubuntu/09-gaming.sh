@@ -268,7 +268,7 @@ cat <<'EOF'
   game-server data.
 
   Budget: the AI stack is installed in full and takes priority, so the Steam
-  library gets roughly 431 GB - about five modern titles at once. Check
+  library gets roughly 221 GB - about two or three modern titles at once. Check
   before a big install, and delete rather than encroach on the free-space
   reserve:
 

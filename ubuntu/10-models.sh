@@ -24,8 +24,12 @@ DOWNLOADER="$KIT_ROOT/models/download-models.sh"
 
 [[ -f "$DOWNLOADER" ]] || die "Cannot find $DOWNLOADER - run this from inside the kit."
 
-GROUPS=("$@")
-(( ${#GROUPS[@]} )) || GROUPS=(all)
+# Not GROUPS: that is a special bash variable holding the caller's Unix group
+# IDs, and assigning to it is silently ignored. Using it here made the loop
+# below iterate over group numbers like 1000 and 27, which match no row in
+# manifest.tsv, so the script reported success having downloaded nothing.
+WANT_GROUPS=("$@")
+(( ${#WANT_GROUPS[@]} )) || WANT_GROUPS=(all)
 
 # ---------------------------------------------------------------------------
 section "Prerequisites"
@@ -34,24 +38,40 @@ ensure_ai_dirs
 
 # The downloader needs the Hugging Face CLI. Installing it here rather than
 # failing keeps an unattended run going; 03-python-cuda.sh may not have run.
+#
+# Both installers put the binary in ~/.local/bin, which is not on PATH in a
+# non-login shell, so put it there before looking. Without this the install
+# reports success and the downloader then exits with "Hugging Face CLI not
+# found", which looks like the download simply did nothing.
+export PATH="$HOME/.local/bin:$PATH"
+
+if ! have hf && ! have huggingface-cli; then
+    if have uv; then
+        info "Installing huggingface_hub with uv."
+        uv tool install "huggingface_hub[cli]" >/dev/null 2>&1 || true
+    else
+        info "Installing huggingface_hub with pip."
+        # Ubuntu marks the system Python externally managed, so a plain
+        # --user install is refused; the override is correct here because
+        # the target is ~/.local, not site-packages.
+        python3 -m pip install --user --quiet --break-system-packages \
+            "huggingface_hub[cli]" >/dev/null 2>&1 || true
+    fi
+    hash -r
+fi
+
 if have hf || have huggingface-cli; then
-    ok "Hugging Face CLI present."
-elif have uv; then
-    info "Installing huggingface_hub with uv."
-    uv tool install "huggingface_hub[cli]" >/dev/null 2>&1 \
-        || die "Could not install the Hugging Face CLI."
-    ok "Hugging Face CLI installed."
+    ok "Hugging Face CLI present: $(command -v hf || command -v huggingface-cli)"
 else
-    python3 -m pip install --user --quiet "huggingface_hub[cli]" \
-        || die "Could not install the Hugging Face CLI. Run ./03-python-cuda.sh first."
-    ok "Hugging Face CLI installed."
+    err "The Hugging Face CLI is not installed and could not be installed here."
+    err "Install it yourself, then re-run this script:"
+    die "    pip install --user --break-system-packages 'huggingface_hub[cli]'"
 fi
 
 # ---------------------------------------------------------------------------
 section "Disk"
 
-avail_gb="$(df -BG --output=avail "$AI_ROOT" 2>/dev/null | tail -n1 | tr -dc '0-9')"
-avail_gb="${avail_gb:-0}"
+avail_gb="$(disk_avail_gb "$AI_ROOT")"
 info "Free on $AI_ROOT: ${avail_gb} GB"
 
 # The full manifest is roughly 100 GB: ~20 for Z-Image, ~38 for Wan 2.2, ~9
@@ -64,7 +84,7 @@ if (( avail_gb < need_gb )); then
 fi
 
 # ---------------------------------------------------------------------------
-for g in "${GROUPS[@]}"; do
+for g in "${WANT_GROUPS[@]}"; do
     section "Downloading group '$g'"
     if bash "$DOWNLOADER" "$g"; then
         ok "Group '$g' complete."

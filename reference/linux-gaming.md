@@ -109,7 +109,7 @@ The open kernel modules installed in `01-nvidia.sh` are the right choice for Bla
 
 Install them under your home directory on the 2 TB Ubuntu drive. In Steam: Settings → Storage → add a library folder.
 
-Budget roughly **431 GB** for the library — about five modern titles at once, or 542 GB if you install Strata only through tier E. The AI stack is installed in full and takes priority on this drive, so gaming is what absorbs the smaller disk. [4tb-upgrade.md](4tb-upgrade.md) itemises what a larger drive would buy back.
+Budget roughly **221 GB** for the library — two or three modern titles at once — if you install the full catalogue with `--tier all`. Stopping at tier F leaves 431 GB, and tier E leaves 542 GB. The AI stack is installed in full and takes priority on this drive, so gaming is what absorbs the smaller disk. [4tb-upgrade.md](4tb-upgrade.md) itemises what a larger drive would buy back.
 
 Keep game installs out of `/srv`. That path is the backup target for the platform and game-server data, and a 200 GB Steam install inside it turns a quick backup into an impossible one.
 

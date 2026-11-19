@@ -14,7 +14,7 @@ The machine has one data drive and no redundancy. Sorted by how bad losing it wo
 | n8n workflows | KB | Only by rebuilding each one by hand |
 | Game worlds | GB | No |
 | Manifests in `server/k8s/` | KB | Yes, from this kit |
-| Model files | 788 GB | Yes, re-downloadable |
+| Model files | ~998 GB | Yes, re-downloadable |
 
 The pattern worth noticing is that **everything irreplaceable is small**. The whole protected set is megabytes to a few gigabytes, which is why offsite storage costs about 50 kr a month rather than being a hardware project.
 

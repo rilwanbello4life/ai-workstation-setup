@@ -20,7 +20,7 @@ Nothing in this kit was deleted when the build landed on a 2 TB drive instead of
 | Game-server worlds | 200 GB | 100 GB | **−100 GB** |
 | Local backups under `/srv/backups` | not budgeted | 100 GB | +100 GB |
 | Reserved free space | not budgeted (would be 372 GB) | 186 GB | — |
-| **Steam library** | **~2 007 GB available** | **~431 GB available** | **−1 576 GB** |
+| **Steam library** | **~2 007 GB available** | **~221 GB available** | **−1 786 GB** |
 
 Two of those rows are corrections rather than cuts. The original 4 TB budget never accounted for the local backup copies that phase 18 writes, nor for the Steam library that phase 19 installs — both were added to the kit after that table was written. They would have had to come out of the 4 TB plan too.
 
@@ -51,21 +51,21 @@ Things you can add back individually on the 2 TB drive, cheapest first. Check `d
 |---|---:|---|
 | Game-server worlds back to 200 GB | +100 GB | Steam library drops to ~442 GB |
 | A second large game-server world (modded Minecraft, Satisfactory) | +50–100 GB | Same trade, smaller |
-| **DeepSeek V4.1-Flash** | **+257 GB** | Steam drops to ~285 GB. See the caution below |
+| **DeepSeek V4.1-Flash** | **+257 GB** | Does not fit at all once tier G is installed — it overruns the drive by ~36 GB. See the caution below |
 | Raising the Windows Strata install past Coder + Qwen3.6 | +23–92 GB each | Comes off the Windows 1 TB, not this drive |
 
 ### On DeepSeek V4.1-Flash
 
 It is the one AI item that genuinely does not fit comfortably, and disk is only half the reason. It wants **257 GB** and measures around **5 tok/s** on a 16 GB card — slower than you can read. It was already outside the recommended set on the 4 TB plan for that reason, so this is not something the smaller drive took away from you.
 
-If you want it anyway, it fits — it just leaves roughly 285 GB for games.
+On the 2 TB drive with `--tier all` it no longer fits at any games budget: 998 GB of packs plus 257 GB of DeepSeek overruns the drive by roughly 36 GB even with an empty Steam library. It is the one model on this page that genuinely requires the 4 TB upgrade.
 
 ## What a 4 TB drive would actually buy
 
 Honest summary, since you may be weighing the upgrade:
 
 - **At 64 GB of RAM, nothing for AI capability.** Every model that fits in 64 GB already fits on 2 TB. The binding constraint is memory, not disk.
-- **At 96 GB, that changes.** UD-IQ4_XS at ~111 GB was taken into the default install as tier F, and it cost the Steam library about 111 GB to do it — the figure above dropped from 542 GB to 431 GB. UD-Q4_K_XL at a further ~130 GB, and NVFP4, no longer fit alongside it without giving up games more or less entirely. This is the first time disk has limited what this machine can *run* rather than what it can store. See [ram-upgrade-decision.md](ram-upgrade-decision.md).
+- **At 96 GB, that changes.** All three 96 GB packs are now in the default install: UD-IQ4_XS as tier F and UD-Q4_K_XL plus NVFP4 as tier G, ~321 GB between them. The Steam library absorbed all of it, falling from 542 GB to about 221 GB. This is the first time disk has limited what this machine can *run* rather than what it can store, and on a 2 TB drive the games are what pay for it. See [ram-upgrade-decision.md](ram-upgrade-decision.md).
 - **About 1 576 GB more for games** — roughly eighteen more modern titles installed at once rather than deleting and re-downloading. This is still the largest practical difference, and on a 4 TB drive UD-Q4_K_XL and NVFP4 both become affordable without touching it.
 - **Room for DeepSeek without trade-offs**, if the 5 tok/s ever becomes acceptable to you.
 - **A larger SLC write cache**, because these drives scale cache with capacity. A 4 TB drive holding the same ~1.2 TB sits at 33% full rather than 61%, and sustained write speed holds up better as a result.

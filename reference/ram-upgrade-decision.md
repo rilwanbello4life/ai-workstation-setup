@@ -230,9 +230,9 @@ Two mitigations cost nothing:
 
 ## What to download
 
-`--tier all` is ~788 GB: tiers A-E at 677 GB, plus UD-IQ4_XS at 111 GB as tier F. Install all of it regardless of which memory configuration you land on — packs are fetched once, and having every one resident is what makes switching modes a one-liner rather than a 76 GB wait.
+`--tier all` is ~998 GB: tiers A-E at 677 GB, UD-IQ4_XS at 111 GB as tier F, and UD-Q4_K_XL plus NVFP4 at ~210 GB as tier G. Install all of it regardless of which memory configuration you land on — packs are fetched once, and having every one resident is what makes switching modes a one-liner rather than a 76 GB wait.
 
-Tier F only *loads* in the 96 GB configuration. Downloading it on 64 GB, or before the DIMMs are fitted, is fine and the installer says so; it simply sits on disk until the memory is there. Use `--tier abcde` to leave it out and keep the Steam library at 542 GB rather than 431 GB.
+Tier F only *loads* in the 96 GB configuration. Downloading it on 64 GB, or before the DIMMs are fitted, is fine and the installer says so; it simply sits on disk until the memory is there. Use `--tier abcdef` to stop at 788 GB and keep 431 GB for Steam, or `--tier abcde` for 677 GB and 542 GB.
 
 ```bash
 cd ai-workstation-setup/ubuntu
@@ -272,7 +272,7 @@ UD-IQ4_XS is tier F and comes with `--tier all`. The other two are not in the ti
 | NVFP4 | ~70 GB | — | by hand, after `ai-pause`; the FP4 tensor cores finally earn their keep |
 | Unsloth UD-Q4_K_XL | ~78 GB | ~130 GB | by hand, after `ai-pause`, 5 GB margin |
 
-**Disk becomes the constraint here, not memory.** Tiers A-F are 788 GB, and adding either remaining pack on top overruns what [partition-layout.md](partition-layout.md) leaves for Steam. Take one only if you have decided what it displaces, or see [4tb-upgrade.md](4tb-upgrade.md).
+**Disk becomes the constraint here, not memory.** All seven tiers come to 998 GB and leave about 221 GB for Steam. That is the trade `--tier all` makes; [partition-layout.md](partition-layout.md) has the arithmetic and [4tb-upgrade.md](4tb-upgrade.md) what a larger drive would buy back.
 
 ## What neither configuration reaches
 
