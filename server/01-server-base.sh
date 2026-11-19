@@ -468,7 +468,13 @@ STATUS_EOF
 # An installed-but-stale copy is worse than a missing one: ai-pause would
 # still appear to work while leaving Argo CD running to undo it. Compare the
 # version marker rather than just checking the file exists.
-installed_version="$(awk -F': ' '/^# helpers-version:/{print $2; exit}' "$PAUSE_BIN" 2>/dev/null)"
+# The '|| true' is load-bearing. awk exits 2 when the file is absent, and
+# under set -e a failed command substitution takes the whole script down with
+# it - silently, because of the 2>/dev/null. The file is absent on exactly
+# the machines that need these helpers installed, so this line used to kill
+# the run one step before writing them: --apply could only ever update
+# helpers that already existed.
+installed_version="$(awk -F': ' '/^# helpers-version:/{print $2; exit}' "$PAUSE_BIN" 2>/dev/null || true)"
 
 if [[ -x "$PAUSE_BIN" && "${installed_version:-0}" == "$HELPERS_VERSION" ]]; then
     ok "ai-pause, ai-resume and ai-status are installed (v$HELPERS_VERSION)."

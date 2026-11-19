@@ -43,7 +43,7 @@ kubectl -n "$K8S_NS" get deploy litellm >/dev/null 2>&1 || \
 [[ -d "$GITOPS_DIR/source" ]] || \
     die "No GitOps repo at $GITOPS_DIR. Run ./08-gitops.sh --apply first."
 
-HOST_IP="$(ip -4 addr show cni0 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1 | head -n1)"
+HOST_IP="$(ip -4 addr show cni0 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1 | head -n1 || true)"
 [[ -n "$HOST_IP" ]] || HOST_IP="10.42.0.1"
 export HOST_IP
 

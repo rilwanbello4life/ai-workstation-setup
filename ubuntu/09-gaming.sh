@@ -217,7 +217,7 @@ fi
 # anything, so draining stays an explicit choice.
 shared=0
 if command -v queue >/dev/null 2>&1; then
-    qline="$(queue status --brief 2>/dev/null)"
+    qline="$(queue status --brief 2>/dev/null || true)"
     if [[ -n "$qline" ]]; then
         inflight="$(printf '%s\n' "$qline" | awk '/in flight/ {print $3 + $5}')"
         # the count can read "3, oldest waiting 14s", so keep only the digits

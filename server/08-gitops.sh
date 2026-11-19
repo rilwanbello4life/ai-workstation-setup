@@ -59,7 +59,7 @@ section "Prerequisites"
 
 # The host address as seen from pods: the cni0 gateway, normally 10.42.0.1.
 # Same value 02-k3s.sh uses for the model services.
-HOST_IP="$(ip -4 addr show cni0 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1 | head -n1)"
+HOST_IP="$(ip -4 addr show cni0 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1 | head -n1 || true)"
 [[ -n "$HOST_IP" ]] || HOST_IP="10.42.0.1"
 export HOST_IP
 info "Pods reach the host at $HOST_IP"

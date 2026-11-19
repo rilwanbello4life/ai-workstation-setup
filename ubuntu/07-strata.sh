@@ -112,7 +112,7 @@ info "System RAM: ${ram_gb} GB usable"
 
 vram_gb=0
 if have nvidia-smi; then
-    vram_mb="$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -n1 | tr -dc '0-9')"
+    vram_mb="$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -n1 | tr -dc '0-9' || true)"
     vram_gb=$(( ${vram_mb:-0} / 1024 ))
     info "VRAM: ${vram_gb} GB"
     (( vram_gb >= 12 )) || die "Strata needs 12 GB of VRAM or more."
@@ -361,7 +361,7 @@ section "Freeing VRAM"
 # The desktop session holds 1-1.5 GB. On a 16 GB card that is the difference
 # between more experts staying resident and spilling to system RAM.
 if have nvidia-smi; then
-    used_mb="$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits 2>/dev/null | head -n1 | tr -dc '0-9')"
+    used_mb="$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits 2>/dev/null | head -n1 | tr -dc '0-9' || true)"
     info "VRAM currently in use: ${used_mb:-0} MB"
     if (( ${used_mb:-0} > 800 )); then
         info "Free most of it with: ai-console-mode off"

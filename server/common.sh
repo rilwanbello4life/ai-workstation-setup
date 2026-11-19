@@ -64,7 +64,7 @@ lan_ip() {
           for (i = 1; i <= NF; i++) if ($i == "dev") d = $(i + 1)
           if (d != "" && d !~ /^tailscale/) { print d; exit } }')"
     [[ -n "$dev" ]] || return 1
-    ip="$(ip -4 addr show "$dev" 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1 | head -n1)"
+    ip="$(ip -4 addr show "$dev" 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1 | head -n1 || true)"
     [[ -n "$ip" ]] || return 1
     echo "$ip"
 }

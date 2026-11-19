@@ -183,7 +183,18 @@ Check `ulimit -l` on Linux. Strata pins 25–30 GB and Ubuntu's default memlock 
 It resumes. Re-run the same `strata launch` and it continues from where it stopped rather than restarting the download.
 
 **My editor or browser gets killed while `07-strata.sh` is "downloading".**
-It is not the download. `strata launch` downloads a pack and then *loads* it, and `02-tune-linux.sh` grants `memlock unlimited` so Strata can pin expert tensors. Pinned pages cannot be reclaimed, so when a pack is bigger than RAM the kernel cannot take the memory back from Strata — it kills the largest reclaimable process instead, which on a desktop is your editor. The process at fault survives and the innocent one dies.
+It is not the download, and on this machine it is usually not the kernel either — it is `systemd-oomd`, which Ubuntu enables by default and which kills on *memory pressure* long before memory actually runs out. A confirmed example:
+
+```
+systemd-oomd: Killed /user.slice/user-1000.slice/user@1000.service/app.slice/
+  app-com.microsoft.VSCode-14230.scope due to memory pressure for
+  /user.slice/user-1000.slice/user@1000.service being 77.25% > 50.00% for > 20s
+  Current Memory Usage: 27.6G
+```
+
+Read that number carefully. The editor was not using 27.6 GB — **Strata was**, and it was charged to the editor's cgroup, because a process started in an integrated terminal is a child of the editor and lives in its scope. `systemd-oomd` kills whole cgroups, so the editor and the download die together. That is why it looks like the download keeps failing on its own.
+
+Underneath it is a load, not a transfer. `strata launch` downloads a pack and then *loads* it, and `02-tune-linux.sh` grants `memlock unlimited` so Strata can pin expert tensors, which makes the memory unreclaimable.
 
 Two things follow. **Run the installer from a plain console or `tmux`, never an editor's built-in terminal** — the terminal is the download's parent, so killing the editor kills the download too, which is why it looks like the download keeps failing. And `07-strata.sh` now runs each load inside `systemd-run --user --scope -p MemoryMax=`, set to RAM minus 6 GB, so an overrun kills Strata rather than your session. On a 96 GB machine that cap never binds.
 

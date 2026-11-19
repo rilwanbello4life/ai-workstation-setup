@@ -218,7 +218,7 @@ section "Host model bridge"
 # through an ingress or hardcoding an IP into every workload.
 #
 # The host IP as seen from pods is the cni0 gateway, normally 10.42.0.1.
-HOST_IP="$(ip -4 addr show cni0 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1 | head -n1)"
+HOST_IP="$(ip -4 addr show cni0 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1 | head -n1 || true)"
 if [[ -z "$HOST_IP" ]]; then
     HOST_IP="10.42.0.1"
     warn "cni0 has no address yet; assuming $HOST_IP."
