@@ -31,6 +31,25 @@ section "Prerequisites"
 
 [[ -x /usr/local/bin/ai-pause ]] || warn "ai-pause missing - run ./01-server-base.sh --apply first."
 
+# 01-server-base.sh creates $SRV_ROOT and chowns it to you; the PersistentVolumes
+# later in this script bind to directories inside $PLATFORM_DIR and are created
+# here as your user, not with sudo.
+#
+# This was a warning once, and that was wrong. Without 01 the script installs
+# k3s, configures kubectl, sets up the GPU runtime and the namespaces, and only
+# then dies on "mkdir: Permission denied" against /srv - leaving a cluster with
+# no storage, no host-model bridge and no loopback forwarding, from an error
+# that names neither the cause nor the fix. Check it before anything is changed.
+if [[ ! -d "$PLATFORM_DIR" ]]; then
+    err "$PLATFORM_DIR does not exist."
+    die "Run ./01-server-base.sh --apply first; it creates $SRV_ROOT and gives it to you."
+fi
+if [[ ! -w "$PLATFORM_DIR" ]]; then
+    err "$PLATFORM_DIR exists but is not writable by $USER."
+    die "Fix with: sudo chown -R $USER:$USER $SRV_ROOT"
+fi
+ok "$PLATFORM_DIR is present and writable."
+
 if ! have nvidia-smi; then
     warn "nvidia-smi not found. GPU workloads in the cluster will not work."
     SKIP_GPU=yes

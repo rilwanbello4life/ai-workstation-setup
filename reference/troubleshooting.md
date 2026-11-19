@@ -248,6 +248,18 @@ ai-status                      # memory, VRAM, model ports, cluster state
 kubectl get pods -A            # what is actually running
 ```
 
+**`02-k3s.sh` ends with `mkdir: Permission denied`, four times.**
+`01-server-base.sh --apply` has not been run. It is what creates `/srv/platform`, `/srv/games` and `/srv/backups` and hands `/srv` to your user; the PersistentVolumes in phase 13 bind to directories inside `/srv/platform` and are created as you, not with `sudo`.
+
+The script now refuses at the start rather than part way through, but if you hit the old behaviour the cluster is half-built: k3s, kubectl, the GPU runtime and the namespaces exist, while the PVs, the host-model bridge and the loopback forwarding do not. Nothing is corrupted and no cleanup is needed:
+
+```bash
+./01-server-base.sh --apply
+./02-k3s.sh                    # re-runnable; finishes the part that was skipped
+```
+
+Creating `/var/lib/rancher/k3s/storage` by hand does not help — that directory belongs to k3s, which runs as root and makes it when first needed. The line naming it in the output is informational, not the failure.
+
 **A pod sits `Pending` forever.**
 Three causes, in order of likelihood. `kubectl -n platform describe pod <name>` names which one.
 1. The namespace ResourceQuota is full. Every pod must declare requests and limits, and the totals are capped at 12Gi requests in `platform` and 8Gi in `games`.
