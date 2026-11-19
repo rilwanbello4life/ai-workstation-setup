@@ -14,6 +14,11 @@
 # already here into that shape and repoints everything that referred to the
 # old locations.
 #
+# Ubuntu's own directories - Desktop, Documents, Downloads, Music, Pictures,
+# Videos - are left exactly as they are, names and contents both. Everything
+# this script creates is lowercase, so the two sets are told apart at a
+# glance and nothing has to be reconfigured to keep the desktop working.
+#
 # The move itself is the cheap part. The whole drive is a single ext4 root -
 # /home, /srv and / are the same filesystem - so every move below is a
 # rename: instant, atomic, no copying, and a terabyte of models costs the
@@ -57,14 +62,20 @@ mkdir -p "$STATE_DIR"
 # The layout.
 #
 # Everything below is derived from these. Change a value here and the plan,
-# the moves, the generated paths.sh and the XDG directories all follow, so
-# this is the only place to edit if you want it shaped differently.
+# the moves and the generated paths.sh all follow, so this is the only place
+# to edit if you want it shaped differently.
 AI_NEW="$HOME/ai"                  # all AI: models, apps, cache, output
 PROJECTS="$HOME/projects"          # anything you write
-DOCS="$HOME/docs"                  # documents, studies, notes
-MEDIA="$HOME/media"                # video, music, pictures
-DOWNLOADS="$HOME/downloads"        # the browser's dumping ground
-DESKTOP="$HOME/desktop"
+
+# Ubuntu's own directories - Desktop, Documents, Downloads, Music, Pictures,
+# Videos - are deliberately left alone. They keep their names, their
+# contents and their XDG registration, so the desktop, Firefox and the
+# screenshot tool carry on working with no configuration at all.
+#
+# Everything this script creates is lowercase, which makes the two sets
+# tell themselves apart at a glance: capitalised means Ubuntu put it there,
+# lowercase means you did.
+DOCUMENTS="$HOME/Documents"
 
 NEW_AI_ROOT="$AI_NEW/models"
 NEW_APPS="$AI_NEW/apps"
@@ -81,12 +92,10 @@ KIT_DST="$PROJECTS/$(basename "$KIT_SRC")"
 SCAFFOLD=(
     "$PROJECTS/web"              "$PROJECTS/games"
     "$PROJECTS/mobile"           "$PROJECTS/experiments"
-    "$DOCS/studies"              "$DOCS/notes"           "$DOCS/admin"
-    "$MEDIA/video"               "$MEDIA/music"
-    "$MEDIA/pictures"            "$MEDIA/screenshots"
-    "$DOWNLOADS"                 "$DESKTOP"
     "$NEW_AI_ROOT"               "$NEW_APPS"
     "$NEW_CACHE"                 "$NEW_OUTPUT"
+    "$DOCUMENTS/studies"         "$DOCUMENTS/notes"
+    "$DOCUMENTS/admin"
 )
 
 # src <TAB> dst. Only applied where src exists; a machine part-way through
@@ -103,12 +112,6 @@ $HOME/ai/voice	$NEW_AI_ROOT/voice
 $HOME/ai/hf-cache	$NEW_CACHE
 $HOME/ai/.downloads.tsv	$NEW_AI_ROOT/.downloads.tsv
 $HOME/apps	$NEW_APPS
-$HOME/Downloads	$DOWNLOADS
-$HOME/Documents	$DOCS
-$HOME/Videos	$MEDIA/video
-$HOME/Music	$MEDIA/music
-$HOME/Pictures	$MEDIA/pictures
-$HOME/Desktop	$DESKTOP
 EOF
 
 # ---------------------------------------------------------------------------
@@ -196,6 +199,17 @@ relocate_venv() {
 }
 
 # ---------------------------------------------------------------------------
+# Keep the first copy and only the first copy.
+#
+# A second --apply would otherwise back up the already-rewritten file over
+# the original, so the surviving copy describes the new layout and --undo
+# restores nothing. Same reasoning as the manifest below: the record of how
+# things were has to survive being run again.
+backup_once() {
+    [[ -e "$1.pre-reorganise" ]] || cp -p "$1" "$1.pre-reorganise"
+}
+
+# ---------------------------------------------------------------------------
 # Rewrite the old paths in one file.
 #
 # The obvious version of this is wrong. AI_ROOT moves from ~/ai to ~/ai/models
@@ -213,12 +227,24 @@ rewrite_paths() {
     # '#' as the delimiter, not '|'. Paths cannot contain it, and it leaves
     # '|' free to mean alternation - with '|' as the delimiter the groups
     # below would have to escape it, which sed then reads as a literal pipe.
-    # The (/|$) guard stops ~/apps matching a sibling like ~/apps-old.
+    #
+    # Every pattern ends by naming what may follow. That is doing two jobs.
+    # It stops ~/apps matching ~/apps-old and ~/ai matching
+    # ~/ai-workstation-setup, which would otherwise be rewritten into
+    # nonsense like ~/ai/models-workstation-setup. And because the new paths
+    # all begin with the old ~/ai followed by a slash, excluding a slash in
+    # the final rule is what stops the script rewriting its own output - so
+    # running it twice is a no-op rather than appending /models again.
+    #
+    # The last rule is the one for a bare ~/ai with nothing after it, which
+    # is how AI_ROOT appears in the voice unit. Without it that unit keeps
+    # pointing at the old root and the voice server finds no models.
     sed -i -E \
-        -e "s#${old_apps}(/|\$)#${NEW_APPS}\\1#g" \
+        -e "s#${old_apps}(\$|[^[:alnum:]_.-])#${NEW_APPS}\\1#g" \
         -e "s#${old_ai}/comfyui/output#${NEW_OUTPUT}#g" \
         -e "s#${old_ai}/hf-cache#${NEW_CACHE}#g" \
         -e "s#${old_ai}/(strata|gguf|comfyui|voice)#${NEW_AI_ROOT}/\\1#g" \
+        -e "s#${old_ai}(\$|[^/[:alnum:]_.-])#${NEW_AI_ROOT}\\1#g" \
         "$f"
 }
 
@@ -236,7 +262,7 @@ fix_references() {
              "$NEW_APPS/start-llama-server.sh" \
              "$NEW_APPS/start-voice.sh"; do
         [[ -f "$f" ]] || continue
-        cp -p "$f" "$f.pre-reorganise"
+        backup_once "$f"
         rewrite_paths "$f" "$old_ai" "$old_apps"
         ok "    rewrote $(short "$f")"
     done
@@ -245,7 +271,7 @@ fix_references() {
     # and the venv python as ExecStart.
     f="$HOME/.config/systemd/user/voice-server.service"
     if [[ -f "$f" ]]; then
-        cp -p "$f" "$f.pre-reorganise"
+        backup_once "$f"
         rewrite_paths "$f" "$old_ai" "$old_apps"
         systemctl --user daemon-reload 2>/dev/null || true
         ok "    rewrote $(short "$f")"
@@ -291,32 +317,6 @@ export HF_HOME="$NEW_CACHE"
 export HUGGINGFACE_HUB_CACHE="$NEW_CACHE/hub"
 EOF
     ok "Wrote $(short "$PATHS_FILE")"
-}
-
-# ---------------------------------------------------------------------------
-# GNOME recreates Desktop, Documents, Downloads, Music, Pictures, Public,
-# Templates and Videos at the next login unless user-dirs.dirs says
-# otherwise. Without this the tidying undoes itself and you end up with both
-# spellings of every directory - which is worse than where you started.
-write_xdg_dirs() {
-    local f="$HOME/.config/user-dirs.dirs"
-    [[ -f "$f" ]] && cp -p "$f" "$f.pre-reorganise"
-    cat > "$f" <<EOF
-# Written by ops/reorganise-home.sh. Keeps GNOME, Firefox and the screenshot
-# tool saving into the layout below instead of recreating the capitalised
-# defaults beside it.
-XDG_DESKTOP_DIR="$DESKTOP"
-XDG_DOWNLOAD_DIR="$DOWNLOADS"
-XDG_DOCUMENTS_DIR="$DOCS"
-XDG_MUSIC_DIR="$MEDIA/music"
-XDG_PICTURES_DIR="$MEDIA/pictures"
-XDG_VIDEOS_DIR="$MEDIA/video"
-XDG_TEMPLATES_DIR="$DOCS/templates"
-XDG_PUBLICSHARE_DIR="$DOWNLOADS/public"
-EOF
-    # Stops the desktop offering to recreate them on the next login.
-    printf 'enabled=False\n' > "$HOME/.config/user-dirs.conf"
-    ok "Wrote $(short "$f")"
 }
 
 # ---------------------------------------------------------------------------
@@ -381,7 +381,8 @@ undo)
     while IFS= read -r f; do
         mv -- "$f" "${f%.pre-reorganise}"
         ok "    restored $(short "${f%.pre-reorganise}")"
-    done < <(find "$HOME/.config" "$HOME/apps" -name '*.pre-reorganise' 2>/dev/null || true)
+    done < <(find "$HOME/.config" "$HOME/apps" "$NEW_APPS" -name '*.pre-reorganise' \
+                2>/dev/null | sort -u || true)
 
     rm -f "$PATHS_FILE" "$MANIFEST"
     systemctl --user daemon-reload 2>/dev/null || true
@@ -441,11 +442,9 @@ plan|apply)
   Also, with --apply:
 
     - create the empty structure: projects/{web,games,mobile,experiments},
-      docs/{studies,notes,admin}, media/{video,music,pictures,screenshots}
+      ai/{models,apps,cache,output} and Documents/{studies,notes,admin}
     - write ~/.config/ai-workstation/paths.sh so every script in the kit
       uses the new locations
-    - repoint the XDG directories so the desktop stops recreating the
-      capitalised ones beside them
     - rewrite the ComfyUI model paths, the launchers, the voice unit and
       the two Python virtualenvs, then check the venvs still work
     - record every move so --undo can reverse it
@@ -459,12 +458,16 @@ EOF
     fi
 
     # -----------------------------------------------------------------
-    # Moving comes before the scaffold on purpose. Several destinations -
-    # desktop, downloads, media/video - are also scaffold entries, and
-    # creating them first would turn "mv ~/Desktop ~/desktop" into a move
-    # into that directory, leaving ~/desktop/Desktop.
+    # Moving comes before the scaffold so that a destination the scaffold
+    # would also create cannot exist yet: mv into an existing directory
+    # moves the source inside it instead of renaming, which is a silently
+    # wrong result rather than an error. Each move makes its own parent.
     section "Moving"
-    printf '# src\tdst\n' > "$MANIFEST"
+
+    # Append, never truncate. The second run has nothing to move, and
+    # rewriting the file at that point would leave a header and no rows -
+    # silently throwing away the only record of where everything came from.
+    [[ -f "$MANIFEST" ]] || printf '# src\tdst\n' > "$MANIFEST"
     for row in "${planned[@]}"; do
         IFS=$'\t' read -r src dst <<<"$row"
         mkdir -p "$(dirname "$dst")"
@@ -475,14 +478,24 @@ EOF
     (( ${#planned[@]} )) || info "Nothing needed moving."
 
     section "Creating the structure"
-    for d in "${SCAFFOLD[@]}"; do mkdir -p "$d"; done
-    ok "${#SCAFFOLD[@]} directories in place."
+
+    # ext4 is case-sensitive, so mkdir ~/projects beside an existing
+    # ~/Projects succeeds and leaves two directories one keystroke apart.
+    # That is exactly the confusion this script exists to remove.
+    for d in "${SCAFFOLD[@]}"; do
+        twin="$(dirname "$d")/$(basename "$d" | sed 's/^./\U&/')"
+        if [[ "$twin" != "$d" && -d "$twin" && ! -d "$d" ]]; then
+            warn "$(short "$twin") already exists - not creating $(short "$d") beside it."
+            continue
+        fi
+        mkdir -p "$d"
+    done
+    ok "Structure in place."
 
     section "Repointing what referred to the old paths"
     REBUILD=()
     fix_references "$HOME/ai" "$HOME/apps"
     write_paths_file
-    write_xdg_dirs
 
     # The reference documentation lives in the kit, so link it where the
     # models are rather than keeping a second copy.
@@ -512,10 +525,15 @@ EOF
   │   ├── output/         generated images and video
   │   └── docs/           -> the kit's reference/
   ├── projects/           web, games, mobile, experiments, and this kit
-  ├── docs/               studies, notes, admin
-  ├── media/              video, music, pictures, screenshots
-  ├── downloads/
-  └── desktop/
+  │
+  ├── Desktop/            Ubuntu's own, untouched
+  ├── Documents/          untouched, with studies/ notes/ admin/ added
+  ├── Downloads/          untouched
+  ├── Music/  Pictures/  Videos/        untouched
+  └── ...
+
+  Lowercase is yours, capitalised is Ubuntu's. The desktop, Firefox and the
+  screenshot tool keep using the capitalised ones exactly as before.
 
   /srv is unchanged: platform state, secrets, backups and game worlds.
 
