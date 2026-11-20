@@ -68,6 +68,8 @@ Usage:
   ./07-strata.sh --tier all --install --download-only
                                       fetch every pack without loading any
   ./07-strata.sh --status             what is downloaded, what is left
+  ./07-strata.sh --tier all --reconcile
+                                      record packs Strata already has
 
 Options:
   --tier LETTERS   any combination of a b c d e f g, or "all"  (default: a)
@@ -92,6 +94,7 @@ EOF
 DOWNLOAD_ONLY=no
 SKIP_FAILED=no
 SHOW_STATUS=no
+RECONCILE=no
 
 while (( $# )); do
     case "$1" in
@@ -101,6 +104,7 @@ while (( $# )); do
         --retry-failed)  SKIP_FAILED=no; shift ;;
         --skip-failed)   SKIP_FAILED=yes; shift ;;
         --status)        SHOW_STATUS=yes; shift ;;
+        --reconcile)     RECONCILE=yes; shift ;;
         -y|--yes)        ASSUME_YES=yes; shift ;;
         -h|--help)       usage; exit 0 ;;
         *) die "Unknown option: $1 (try --help)" ;;
@@ -219,18 +223,117 @@ strata_rows() {
     done
 }
 
+# ---------------------------------------------------------------------------
+# Ask Strata what it already has, and believe it.
+#
+# Strata downloads into its own store - ~/.local/share/strata - and the kit
+# has never told it where to put anything, so there is no directory the
+# ledger can look in. The only authority on what has been fetched is Strata
+# itself, and "strata models list" is a read-only question with no load and
+# no download behind it.
+#
+# Without this, the cheapest way to find out whether a pack was already
+# downloaded would be to launch it and see, which on a 32 GB machine means
+# loading tens of gigabytes before being killed - per pack, every run.
+#
+# Matching needs two rules because Strata names a pack after its model alone
+# when it belongs to the default family, and after family and model
+# otherwise: Coder appears as coder-iq1_m, but plain Flash-Next IQ2_XS is
+# just iq2_xs rather than qwen-iq2_xs. Preset first, then the bare model name
+# but only when exactly one pack claims it - so qwen/UD-Q4_K_XL is not
+# matched by qwen36-ud-q4_k_xl, which is a different model of the same name.
+strata_present() {
+    local preset="$1" bare="$2" listing="$3" hit
+
+    hit="$(awk -v p="$preset" '$2 == "present" && $1 == p { print $3; exit }' <<<"$listing")"
+    if [[ -n "$hit" ]]; then printf '%s' "$hit"; return 0; fi
+
+    if (( $(awk -v b="$bare" '$2 == "present" && $1 == b' <<<"$listing" | wc -l) == 1 )); then
+        awk -v b="$bare" '$2 == "present" && $1 == b { print $3; exit }' <<<"$listing"
+        return 0
+    fi
+    return 1
+}
+
+# Sets RECONCILED_N to the number of packs newly recorded. A count returned
+# on stdout would be interleaved with the per-pack lines below, which is
+# exactly the sort of thing that reads as a formatting glitch and hides a
+# real number. Quiet unless asked, so an install run can call it without
+# burying the output it is about to produce.
+RECONCILED_N=0
+reconcile_ledger() {
+    local verbose="${1:-no}" listing entry fam mod tier gb desc preset bare id found n=0
+
+    RECONCILED_N=0
+
+    have strata || return 0
+    listing="$(strata models list 2>/dev/null || true)"
+    [[ -n "$listing" ]] || return 0
+    ledger_init
+
+    for entry in "${selected[@]}"; do
+        IFS='|' read -r fam mod tier gb desc <<<"$entry"
+        id="${fam}/${mod}"
+        [[ "$(ledger_status strata "$id")" == ok ]] && continue
+
+        preset="$(tr '[:upper:]' '[:lower:]' <<<"${fam}-${mod}")"
+        bare="$(tr '[:upper:]' '[:lower:]' <<<"$mod")"
+
+        if found="$(strata_present "$preset" "$bare" "$listing")"; then
+            ledger_mark strata "$id" ok "already in the Strata store as $found"
+            [[ "$verbose" == yes ]] && ok "  $id  <-  $found"
+            n=$(( n + 1 ))
+        fi
+    done
+
+    RECONCILED_N="$n"
+}
+
+if [[ "$RECONCILE" == yes ]]; then
+    section "Checking what Strata already has"
+    have strata || die "strata is not installed - nothing to reconcile against."
+    reconcile_ledger yes
+    echo
+    info "Recorded $RECONCILED_N pack(s) that were already downloaded."
+    strata_rows | ledger_progress strata "Strata packs - tier ${TIERS}"
+    echo
+    info "Ledger: $DOWNLOAD_LEDGER"
+    exit 0
+fi
+
+# Record what Strata already has before any decision depends on it. Both
+# things below need it: --status would otherwise report a pack as
+# outstanding when it is sitting on the disk, and the size check further
+# down has to measure what is still missing rather than the whole plan.
+reconcile_ledger
+
+# What is actually left to fetch. Sizing the check by the full plan is what
+# the first version did, and on this machine that reads as 1004 GB wanted
+# against 615 GB spendable - so it refuses to start a download that is
+# really 321 GB and fits with room to spare.
+remaining=0
+for entry in "${selected[@]}"; do
+    IFS='|' read -r fam mod tier gb desc <<<"$entry"
+    [[ "$(ledger_status strata "${fam}/${mod}")" == ok ]] && continue
+    remaining=$(( remaining + gb ))
+done
+
 if [[ "$SHOW_STATUS" == yes ]]; then
     strata_rows | ledger_progress strata "Strata packs - tier ${TIERS}"
     echo
     info "Ledger: $DOWNLOAD_LEDGER"
     exit 0
 fi
-info "Download total: ~${total} GB (plus ~6 GB MTP draft layer, shared)"
+info "Plan total:     ~${total} GB across ${#selected[@]} pack(s)"
+if (( remaining != total )); then
+    info "Already have:   ~$(( total - remaining )) GB"
+fi
+info "Still to fetch: ~${remaining} GB (plus ~6 GB MTP draft layer, shared)"
 info "Spendable:      ${spendable_gb} GB"
 
-if (( total + 6 > spendable_gb )); then
-    warn "This plan does not fit."
-    warn "It wants ~$(( total + 6 )) GB; ${spendable_gb} GB is spendable."
+if (( remaining + 6 > spendable_gb )); then
+    warn "What is left does not fit."
+    warn "It wants ~$(( remaining + 6 )) GB; ${spendable_gb} GB is spendable."
     warn "Drop a tier, use --tier a, or free space elsewhere."
     # In plan mode this is advice. In install mode it is a wall, because the
     # failure arrives 600 GB into a download rather than here.
@@ -482,6 +585,13 @@ fi
 
 ledger_init
 info "Ledger: $DOWNLOAD_LEDGER"
+
+# Before launching anything, record what Strata already has. Skipping a pack
+# costs one line; discovering it the hard way costs a load that gets killed.
+reconcile_ledger
+if (( RECONCILED_N > 0 )); then
+    ok "$RECONCILED_N pack(s) are already in the Strata store; they will be skipped."
+fi
 
 installed=()
 failed=()
