@@ -4,11 +4,18 @@ Absolute paths for everything the kit installs on the Ubuntu side, so you can fi
 
 Paths are shown for the user `rilwan`. Three variables decide them, all set in [`../ubuntu/common.sh`](../ubuntu/common.sh) and all overridable by exporting them before you run anything:
 
-| Variable | Default | Holds |
-|---|---|---|
-| `AI_ROOT` | `/home/rilwan/ai` | Models and generated output — the big directory |
-| `APPS` | `/home/rilwan/apps` | Application checkouts and their virtualenvs |
-| `SRV_ROOT` | `/srv` | Platform state: databases, secrets, backups, game worlds |
+| Variable | Before reorganising | After `ops/reorganise-home.sh` | Holds |
+|---|---|---|---|
+| `AI_HOME` | `/home/rilwan/ai` | `/home/rilwan/ai` | Everything AI, the one directory to move or back up |
+| `AI_ROOT` | `/home/rilwan/ai` | `/home/rilwan/ai/models` | Model weights |
+| `APPS` | `/home/rilwan/apps` | `/home/rilwan/ai/apps` | Application checkouts and their virtualenvs |
+| `AI_OUTPUT` | `$AI_ROOT/comfyui/output` | `/home/rilwan/ai/output` | Generated images and video |
+| `HF_HOME` | `$AI_ROOT/hf-cache` | `/home/rilwan/ai/cache` | Hugging Face cache |
+| `SRV_ROOT` | `/srv` | `/srv` | Platform state: databases, secrets, backups, game worlds |
+
+The kit reads `/home/rilwan/.config/ai-workstation/paths.sh` before applying any of these defaults, and `ops/reorganise-home.sh` is what writes it. Until it has run, the defaults in the first column apply and nothing has moved. That file is yours to edit; `env.sh` beside it is generated and is not.
+
+The repository itself lives at `/home/rilwan/Projects/ai-workstation-setup`.
 
 The split is deliberate. `AI_ROOT` is large and re-downloadable, so it is never backed up. `SRV_ROOT` is small and irreplaceable, so all of it is. `APPS` is rebuildable from Git.
 
@@ -40,19 +47,43 @@ The split is deliberate. `AI_ROOT` is large and re-downloadable, so it is never 
 
 Everything except `strata/` is placed by [`../models/manifest.tsv`](../models/manifest.tsv) through `ubuntu/10-models.sh`. What each entry is and why it was chosen: [`../models/MANIFEST.md`](../models/MANIFEST.md).
 
-**The one path to verify yourself is `strata/`.** The kit creates `/home/rilwan/ai/strata` and `status.sh` measures it, but nothing in the scripts tells the Strata CLI to use it — Strata is installed by its own `install.sh` and manages its own storage. On a machine where packs have been installed, find out where they actually went:
+**Strata does not store its packs under `AI_ROOT`.** This was an open question in earlier versions of this document and is now settled: on this machine the library is `/home/rilwan/.local/share/strata`, holding **568 GB**, while the `/home/rilwan/ai/strata` the kit creates sits empty beside it. `status.sh` used to measure the empty one and so reported almost nothing; it now resolves the real store and says which path it measured.
+
+Strata chooses that location itself and remembers it in `/home/rilwan/.config/strata/settings.json` under `data_dir`. The documented default on Linux is `$XDG_DATA_HOME/strata`, which is where the engine components and the install also live.
+
+Find the library, and what is in it:
 
 ```sh
 strata models list
-du -sh /home/rilwan/ai/strata ~/.cache/strata ~/.strata 2>/dev/null
+python3 -c 'import json,os;print(json.load(open(os.path.expanduser("~/.config/strata/settings.json"))).get("data_dir"))'
+du -sh ~/.local/share/strata
 ```
 
-This matters because the packs are the largest thing on the drive by an order of magnitude. Both candidate locations are under `/home`, so they land on the Ubuntu drive either way and the disk budget in [partition-layout.md](partition-layout.md) holds — but if you ever move `AI_ROOT` to another disk, check that Strata followed.
+To move it, use Strata rather than `mv` — the settings file has to follow the data:
+
+```sh
+strata launch --data-dir /home/rilwan/ai/models/strata --move-data
+```
+
+`ops/reorganise-home.sh` does **not** move it. It points `ai/models/strata` at wherever the library actually is with a symlink, so the packs show up where this map says models live without the setting and the data being able to disagree. `--undo` removes the symlink and never the data behind it.
+
+## What has been downloaded
+
+Every confirmed download is recorded in `$AI_ROOT/.downloads.tsv` — `/home/rilwan/ai/.downloads.tsv` before reorganising, `/home/rilwan/ai/models/.downloads.tsv` after. That file, not the filesystem, is what later runs consult; see [the download ledger](../models/MANIFEST.md#the-download-ledger).
+
+```sh
+cd ~/Projects/ai-workstation-setup/ubuntu
+./10-models.sh --status                 # the manifest models
+./07-strata.sh --tier all --status      # the Strata packs
+./07-strata.sh --tier all --reconcile   # adopt packs Strata already has
+```
+
+Strata packs are reconciled from `strata models list`, because there is no directory the ledger could check.
 
 ## Applications
 
 ```
-/home/rilwan/apps/
+/home/rilwan/ai/apps/   (was /home/rilwan/apps)
 ├── llama.cpp/
 │   └── build/bin/
 │       ├── llama-server                       the OpenAI-compatible server on 8081

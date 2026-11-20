@@ -303,6 +303,58 @@ fix_references() {
 }
 
 # ---------------------------------------------------------------------------
+# Strata's packs are the largest thing on the drive and the one thing this
+# script cannot simply move.
+#
+# Strata keeps its own library and the kit has never told it where to put
+# anything, so the ~/ai/strata that ensure_ai_dirs creates has always been
+# an empty directory next to hundreds of gigabytes stored elsewhere - on
+# this machine 568 GB under ~/.local/share/strata. status.sh measured the
+# empty one, which is why it reported almost nothing.
+#
+# A symlink is used rather than a move. Strata records its library in
+# ~/.config/strata/settings.json and relocating it properly is its own job,
+# via "strata launch --data-dir DIR --move-data"; renaming the directory
+# behind its back would leave that setting pointing at nothing. The symlink
+# costs nothing, is removed by --undo, and makes the layout honest: the
+# packs appear where the map says models live.
+link_strata_store() {
+    local store="" cand
+
+    if [[ -r "$HOME/.config/strata/settings.json" ]] && have python3; then
+        store="$(python3 -c 'import json, os
+try:
+    d = json.load(open(os.path.expanduser("~/.config/strata/settings.json"))).get("data_dir") or ""
+except Exception:
+    d = ""
+print(d if d and os.path.isdir(d) else "")' 2>/dev/null || true)"
+    fi
+    if [[ -z "$store" ]]; then
+        cand="${XDG_DATA_HOME:-$HOME/.local/share}/strata"
+        [[ -d "$cand" ]] && store="$cand"
+    fi
+    [[ -n "$store" ]] || { info "No Strata store found yet - nothing to link."; return 0; }
+
+    # Only ever replace an empty directory. If something real is in there,
+    # say so and leave it: losing model data to a tidy-up is unthinkable.
+    if [[ -L "$NEW_AI_ROOT/strata" ]]; then
+        ln -sfn "$store" "$NEW_AI_ROOT/strata"
+    elif [[ -d "$NEW_AI_ROOT/strata" ]]; then
+        if rmdir "$NEW_AI_ROOT/strata" 2>/dev/null; then
+            ln -sfn "$store" "$NEW_AI_ROOT/strata"
+        else
+            warn "$(short "$NEW_AI_ROOT/strata") is not empty - leaving it alone."
+            warn "The real Strata library is $(short "$store")."
+            return 0
+        fi
+    else
+        ln -sfn "$store" "$NEW_AI_ROOT/strata"
+    fi
+
+    ok "Linked $(short "$NEW_AI_ROOT/strata") -> $(short "$store")  ($(du -sh "$store" 2>/dev/null | cut -f1))"
+}
+
+# ---------------------------------------------------------------------------
 # Tell the rest of the kit where things are now.
 #
 # This file is the whole migration mechanism. ubuntu/common.sh and status.sh
@@ -392,6 +444,9 @@ undo)
     done < <(find "$HOME/.config" "$HOME/apps" "$NEW_APPS" -name '*.pre-reorganise' \
                 2>/dev/null | sort -u || true)
 
+    # A symlink, so this removes the pointer and never the 500+ GB behind it.
+    [[ -L "$NEW_AI_ROOT/strata" ]] && rm -f "$NEW_AI_ROOT/strata"
+
     rm -f "$PATHS_FILE" "$MANIFEST"
     systemctl --user daemon-reload 2>/dev/null || true
 
@@ -455,6 +510,8 @@ plan|apply)
       uses the new locations
     - rewrite the ComfyUI model paths, the launchers, the voice unit and
       the two Python virtualenvs, then check the venvs still work
+    - point ai/models/strata at Strata's real library, which lives in its
+      own store and is not moved
     - record every move so --undo can reverse it
 
   The drive is a single filesystem, so each move is a rename. Even the
@@ -504,6 +561,7 @@ EOF
     REBUILD=()
     fix_references "$HOME/ai" "$HOME/apps"
     write_paths_file
+    link_strata_store
 
     # The reference documentation lives in the kit, so link it where the
     # models are rather than keeping a second copy.
@@ -527,7 +585,8 @@ EOF
     cat <<EOF
   ~/
   ├── ai/                 everything AI
-  │   ├── models/         weights - strata, gguf, comfyui, voice
+  │   ├── models/         weights - gguf, comfyui, voice
+  │   │   └── strata/     -> Strata's own library, wherever it keeps it
   │   ├── apps/           ComfyUI, llama.cpp, open-webui, voice, launchers
   │   ├── cache/          Hugging Face cache
   │   ├── output/         generated images and video

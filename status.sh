@@ -324,7 +324,33 @@ if have strata; then
 else
     miss "strata CLI" "run 07-strata.sh"
 fi
-[[ -d "$AI_ROOT/strata" ]] && note "Strata on disk" "$(du -sh "$AI_ROOT/strata" 2>/dev/null | cut -f1)"
+# Strata keeps its packs in its own store, not under AI_ROOT. This used to
+# measure $AI_ROOT/strata, which the kit creates and Strata never writes to,
+# so it reported an empty directory while hundreds of gigabytes sat
+# elsewhere. Ask Strata's own settings where the library is, fall back to
+# the documented default, and say which one is being measured.
+strata_store=""
+if [[ -r "$HOME/.config/strata/settings.json" ]] && have python3; then
+    strata_store="$(python3 -c 'import json,os,sys
+try:
+    d = json.load(open(os.path.expanduser("~/.config/strata/settings.json"))).get("data_dir") or ""
+except Exception:
+    d = ""
+print(d if d and os.path.isdir(d) else "")' 2>/dev/null || true)"
+fi
+if [[ -z "$strata_store" ]]; then
+    cand="${XDG_DATA_HOME:-$HOME/.local/share}/strata"
+    [[ -d "$cand" ]] && strata_store="$cand"
+fi
+if [[ -n "$strata_store" ]]; then
+    note "Strata store" "$(du -sh "$strata_store" 2>/dev/null | cut -f1)  at ${strata_store/#$HOME/\~}"
+else
+    note "Strata store" "not found - no packs downloaded yet"
+fi
+if [[ -d "$AI_ROOT/strata" && ! -L "$AI_ROOT/strata" ]] \
+   && [[ -z "$(ls -A "$AI_ROOT/strata" 2>/dev/null)" ]]; then
+    note "${AI_ROOT/#$HOME/\~}/strata" "empty - Strata does not use it; the store above is the real one"
+fi
 note "AI_ROOT total" "$(du -sh "$AI_ROOT" 2>/dev/null | cut -f1)"
 
 # =========================================================================
