@@ -40,7 +40,17 @@ spec:
         app: postgres
     spec:
       securityContext:
-        fsGroup: 999
+        # 70, not 999. The Debian postgres image runs as uid/gid 999; the
+        # alpine one used here runs as 70. The mismatch was survivable -
+        # fsGroup is added as a supplementary group, so postgres could still
+        # write - but it meant the volume was owned by a group nothing in the
+        # container belonged to.
+        fsGroup: 70
+        # Without this, the kubelet walks and chowns the entire volume on
+        # every single mount. On a hostPath holding a real database that is
+        # slow, it happens before the container starts, and it is time that
+        # counts against the startup budget below.
+        fsGroupChangePolicy: OnRootMismatch
       containers:
         - name: postgres
           image: postgres:16-alpine
@@ -74,6 +84,26 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /var/lib/postgresql/data
+          # A liveness probe must not police startup. Without a startupProbe
+          # the liveness probe below begins at 60s and kills the container
+          # after three more failures - 150s in total. First boot has to run
+          # initdb, fsync a fresh cluster to disk and then start; on a drive
+          # that is busy doing something else, such as downloading model
+          # packs, that can take longer than 150s.
+          #
+          # What that produces is a loop rather than an error: the kill
+          # interrupts initdb, leaving a half-written data directory that
+          # makes the next attempt slower still. The pod shows as Running
+          # the whole time, the events say only "Liveness probe failed", and
+          # nothing anywhere mentions that it was never given time to start.
+          #
+          # 30 x 10s allows five minutes to become ready once, and liveness
+          # does not run at all until the startup probe has passed.
+          startupProbe:
+            exec:
+              command: [sh, -c, "pg_isready -U postgres"]
+            periodSeconds: 10
+            failureThreshold: 30
           readinessProbe:
             exec:
               command: [sh, -c, "pg_isready -U postgres"]
@@ -82,7 +112,6 @@ spec:
           livenessProbe:
             exec:
               command: [sh, -c, "pg_isready -U postgres"]
-            initialDelaySeconds: 60
             periodSeconds: 30
       volumes:
         - name: data

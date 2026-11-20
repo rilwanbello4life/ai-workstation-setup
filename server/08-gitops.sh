@@ -110,9 +110,11 @@ if [[ -d "$GITOPS_BARE" ]]; then
 else
     sudo mkdir -p "$GITOPS_BARE"
     sudo chown -R "$USER:$USER" "$GITOPS_BARE"
-    # --initial-branch needs git 2.28. Setting HEAD afterwards works on any
-    # version and leaves the same result.
-    git init --bare "$GITOPS_BARE" >/dev/null
+    # '-c init.defaultBranch=main' rather than '--initial-branch', which
+    # needs git 2.28. It also suppresses the twelve-line hint git prints
+    # when the default is unconfigured - noise that buries real output.
+    # The symbolic-ref is the belt to that braces on git older than 2.28.
+    git -c init.defaultBranch=main init --bare "$GITOPS_BARE" >/dev/null
     git -C "$GITOPS_BARE" symbolic-ref HEAD refs/heads/main
     ok "Created $GITOPS_BARE"
     note_change
@@ -128,11 +130,26 @@ if [[ -d "$GITOPS_DIR/.git" ]]; then
 else
     sudo mkdir -p "$GITOPS_DIR"
     sudo chown -R "$USER:$USER" "$GITOPS_DIR"
-    git init "$GITOPS_DIR" >/dev/null
+    git -c init.defaultBranch=main init "$GITOPS_DIR" >/dev/null
     git -C "$GITOPS_DIR" symbolic-ref HEAD refs/heads/main
     ok "Created $GITOPS_DIR"
     note_change
 fi
+
+# Give the repository its own identity.
+#
+# Every commit here is made by a script or a systemd timer, not by a person,
+# so the author should say that rather than borrow whoever happens to be
+# logged in. More immediately: a machine with no global user.email cannot
+# commit at all, and git's refusal arrives at the end of a long successful
+# run with "Please tell me who you are" and a global config suggestion -
+# which is the wrong fix, since this identity should not leak into the
+# user's other repositories.
+#
+# Set unconditionally rather than only on creation: a repo created before
+# this existed would otherwise stay broken.
+git -C "$GITOPS_DIR" config user.email "gitops@$(hostname -s 2>/dev/null || echo localhost)"
+git -C "$GITOPS_DIR" config user.name  "GitOps automation"
 
 mkdir -p "$GITOPS_DIR"/{source,rendered/manual,apps}
 
