@@ -40,17 +40,61 @@ spec:
         app: postgres
     spec:
       securityContext:
-        # 70, not 999. The Debian postgres image runs as uid/gid 999; the
-        # alpine one used here runs as 70. The mismatch was survivable -
-        # fsGroup is added as a supplementary group, so postgres could still
-        # write - but it meant the volume was owned by a group nothing in the
-        # container belonged to.
+        # Run as postgres from the start, rather than starting as root and
+        # dropping privileges. This is not only tidier - it is required on
+        # Ubuntu 24.04 and later.
+        #
+        # The entrypoint drops privileges with 'exec gosu postgres', and
+        # gosu is a Go program whose runtime signals its own threads with
+        # rtmin+1 to preempt goroutines. The AppArmor profile containerd
+        # applies there denies cross-profile signals, so gosu hangs before
+        # it ever execs postgres:
+        #
+        #   apparmor="DENIED" operation="signal" comm="gosu"
+        #   requested_mask="send" signal=rtmin+1
+        #
+        # The container stays Running and writes nothing at all - no
+        # initdb banner, no error - because postgres has not been reached.
+        # Every probe then fails, and the pod looks like a database that
+        # will not start rather than one that never started.
+        #
+        # The entrypoint only calls gosu when it finds itself running as
+        # root, so running as 70 directly skips the branch entirely.
+        # 70 is the postgres uid in the alpine image; the Debian image
+        # uses 999.
+        runAsUser: 70
+        runAsGroup: 70
         fsGroup: 70
-        # Without this, the kubelet walks and chowns the entire volume on
-        # every single mount. On a hostPath holding a real database that is
-        # slow, it happens before the container starts, and it is time that
-        # counts against the startup budget below.
         fsGroupChangePolicy: OnRootMismatch
+      # fsGroup does nothing here: the kubelet only manages ownership for
+      # volume plugins that support it, and hostPath is not one of them. A
+      # directory made by DirectoryOrCreate is root:root 0755, which uid 70
+      # cannot write. So the chown has to happen in the pod, as root, before
+      # the unprivileged container starts.
+      #
+      # Resources are mandatory rather than good manners - the platform
+      # namespace has a ResourceQuota that rejects any pod with a container
+      # missing them, init containers included.
+      initContainers:
+        - name: fix-permissions
+          image: postgres:16-alpine
+          command:
+            - sh
+            - -c
+            - chown -R 70:70 /var/lib/postgresql/data &&
+              chmod 700 /var/lib/postgresql/data
+          securityContext:
+            runAsUser: 0
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          resources:
+            requests:
+              memory: 32Mi
+              cpu: 10m
+            limits:
+              memory: 64Mi
+              cpu: 200m
       containers:
         - name: postgres
           image: postgres:16-alpine

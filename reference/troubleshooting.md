@@ -289,6 +289,59 @@ ai-status                      # memory, VRAM, model ports, cluster state
 kubectl get pods -A            # what is actually running
 ```
 
+**A pod stays `Running`, never becomes ready, and its logs are completely empty.**
+Not slow, not erroring — zero bytes. `kubectl logs` returns nothing and `/var/log/pods/<namespace>_<pod>_*/<container>/*.log` is an empty file. Every probe fails, the liveness probe eventually restarts it, and the cycle repeats without a single line of output.
+
+Check the kernel log rather than anything in Kubernetes:
+
+```bash
+sudo dmesg -T | grep -i 'apparmor.*DENIED'
+```
+
+On Ubuntu 24.04 and later this is usually AppArmor blocking `gosu`:
+
+```
+apparmor="DENIED" operation="signal" comm="gosu" requested_mask="send" signal=rtmin+1
+```
+
+Many official images start as root and drop privileges with `gosu` before exec'ing the real process. `gosu` is written in Go, and the Go runtime signals its own threads with `rtmin+1` to preempt goroutines. The AppArmor profile containerd applies denies cross-profile signals, so `gosu` hangs *before* it execs anything. The container is alive and the application has never run, which is why there is nothing to log.
+
+The fix is to not become root in the first place, since these entrypoints only call `gosu` when they find themselves running as uid 0:
+
+```yaml
+securityContext:
+  runAsUser: 70        # the uid the image expects; postgres:*-alpine is 70
+  runAsGroup: 70
+```
+
+For a `hostPath` volume you also need an init container to `chown` the directory, because `fsGroup` does nothing there — the kubelet only manages ownership for volume plugins that support it, and `hostPath` is not one. `server/k8s/10-postgres.yaml` has a worked example of both halves.
+
+This affects any image using `gosu` or `su-exec`, so expect it in the Minecraft, n8n, LiteLLM and Open WebUI manifests if you change their images. Setting the pod's AppArmor profile to `Unconfined` also works and is the wrong trade: it disables the confinement for everything in the pod to fix one thirty-second privilege drop.
+
+**`kubectl logs` and `kubectl exec` fail with `x509: certificate is valid for ... not <IP>`.**
+The node registered under one address and the kubelet's serving certificate was issued for another — typically because Tailscale was up when the node first registered, so the node advertises `100.x.y.z` while the certificate covers the LAN address. Everything that proxies through the kubelet breaks: `logs`, `exec`, `cp`, `top`. Scripts that pipe SQL in with `kubectl exec` fail in ways that look like SQL errors.
+
+Deleting the certificate does not help; k3s regenerates it with the same addresses. Pin the node address instead:
+
+```bash
+sudo mkdir -p /etc/rancher/k3s
+sudo sh -c 'printf "node-ip: 192.168.1.139\n" >> /etc/rancher/k3s/config.yaml'
+sudo systemctl restart k3s
+kubectl get nodes -o wide
+```
+
+Use the LAN address rather than the Tailscale one, so the cluster's internal addressing does not depend on Tailscale being up. Check the file first — appending a duplicate `node-ip` key stops k3s from starting. Container logs are readable from disk meanwhile, under `/var/log/pods`, which needs no working kubelet.
+
+**A one-off `kubectl run` in `platform` is rejected with `failed quota: platform-ceiling`.**
+The namespace quota requires every container to declare `requests.cpu`, `requests.memory` and `limits.memory`, and `kubectl run` sets none by default. This applies to init containers too:
+
+```bash
+kubectl -n platform run probe --rm -i --restart=Never --image=alpine \
+  --overrides='{"spec":{"containers":[{"name":"probe","image":"alpine","command":["sh","-c","id"],"resources":{"requests":{"cpu":"10m","memory":"32Mi"},"limits":{"memory":"64Mi"}}}]}}'
+```
+
+Or use the `games` namespace, or `default`, neither of which is capped this way.
+
 **`02-k3s.sh` ends with `mkdir: Permission denied`, four times.**
 `01-server-base.sh --apply` has not been run. It is what creates `/srv/platform`, `/srv/games` and `/srv/backups` and hands `/srv` to your user; the PersistentVolumes in phase 13 bind to directories inside `/srv/platform` and are created as you, not with `sudo`.
 
