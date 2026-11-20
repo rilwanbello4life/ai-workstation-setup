@@ -111,7 +111,7 @@ The decisive test is to take the compositor out of the picture entirely:
 
 ```bash
 ai-console-mode off          # drops to a text console, no desktop at all
-cd ~/ai-workstation-setup/ubuntu && ./03-python-cuda.sh
+cd ~/Projects/ai-workstation-setup/ubuntu && ./03-python-cuda.sh
 ai-console-mode on
 ```
 

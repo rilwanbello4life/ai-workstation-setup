@@ -153,7 +153,7 @@ sudo chown -R "$USER:$USER" /srv
 These are the levers everything later depends on. Rather than reproduce three scripts here, extract them from the kit:
 
 ```bash
-cd ~/ai-workstation-setup/server
+cd ~/Projects/ai-workstation-setup/server
 ./01-server-base.sh --apply
 ```
 

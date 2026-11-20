@@ -67,6 +67,14 @@ mkdir -p "$STATE_DIR"
 AI_NEW="$HOME/ai"                  # all AI: models, apps, cache, output
 PROJECTS="$HOME/projects"          # anything you write
 
+# Unless you already have one under a different capitalisation, in which case
+# that is the one to use. ext4 is case-sensitive, so creating ~/projects
+# beside an existing ~/Projects succeeds and leaves two directories one
+# keystroke apart, with the kit in one and everything else in the other.
+if [[ -d "$HOME/Projects" && ! -d "$HOME/projects" ]]; then
+    PROJECTS="$HOME/Projects"
+fi
+
 # Ubuntu's own directories - Desktop, Documents, Downloads, Music, Pictures,
 # Videos - are deliberately left alone. They keep their names, their
 # contents and their XDG registration, so the desktop, Firefox and the
