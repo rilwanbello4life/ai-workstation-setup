@@ -4,11 +4,43 @@ The numbered scripts in `ubuntu/` and `server/` **build** the machine and are me
 
 | Script | When |
 |---|---|
+| [`r1wc.sh`](r1wc.sh) | **Start here.** The console: everything on one page, with docs on each entry. |
 | [`up.sh`](up.sh) | After every boot. Verifies the services, undoes a leftover pause, waits for the cluster. |
 | [`switch.sh`](switch.sh) | Whenever you want a different model. Only one fits at a time. |
 | [`down.sh`](down.sh) | Before a planned shutdown or reboot. Snapshots Postgres first. |
 
-All three are safe to run when there is nothing to do.
+All of them are safe to run when there is nothing to do.
+
+## The console
+
+```sh
+./r1wc.sh --install     # once; puts 'r1wc' on PATH
+r1wc                    # from anywhere, thereafter
+```
+
+One page listing every service in the stack with its live state, grouped into models, platform, access, games and maintenance. Pick a number and you get five choices for that entry: read its documentation, start it, stop it, open its interface, or go back.
+
+It implements almost nothing itself. Each action runs the command you would have run by hand — `ops/switch.sh`, `systemctl`, `kubectl`, `ai-pause`, `platform-backup` — and the documentation for each entry names that command. So there is one implementation of every operation, and the console is a way of finding it rather than a second copy that can drift.
+
+The one piece of real logic is the GPU rule. Entries marked `[gpu]` are started through `switch.sh`, which stops whatever holds the card and waits for the driver to release the memory first. Entries without that marker skip all of it, because they genuinely coexist — the voice server runs happily beside a 60 GB pack, since Whisper and Kokoro are both on the CPU.
+
+Non-interactively, for scripts or when you know what you want:
+
+```sh
+r1wc status             # every entry's state, one line each
+r1wc docs postgres      # just the documentation
+r1wc start strata iq2_xs
+r1wc stop comfyui
+r1wc ui argocd
+```
+
+**Strata has no web interface** — its real UI is the terminal monitor you get from `strata launch --preset <name>`, and Open WebUI on port 3000 is the chat front-end that talks to its API. If you have a Strata desktop app or a local page, point `R1WC_STRATA_UI` at the file or URL and `r1wc ui strata` will open that instead:
+
+```sh
+echo 'export R1WC_STRATA_UI=/path/to/the/file' >> ~/.bashrc
+```
+
+`--install` symlinks rather than copies, so `git pull` updates the installed command too.
 
 ## After a reboot
 
