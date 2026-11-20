@@ -46,8 +46,45 @@ spec:
       labels:
         app: postgres
     spec:
+      # This block must stay in step with server/k8s/10-postgres.yaml, which
+      # carries the full reasoning for each line. In short, all three exist
+      # because of Ubuntu 24.04's AppArmor profile and hostPath ownership:
+      #
+      #   appArmorProfile  the profile denies cross-profile signals, which
+      #                    hangs gosu at startup and blocks the SIGURG that
+      #                    postgres backends use to wake each other
+      #   runAsUser 70     skips the entrypoint's gosu branch entirely
+      #   initContainer    fsGroup does nothing on a hostPath volume, so the
+      #                    chown has to happen in the pod, as root
       securityContext:
-        fsGroup: 999
+        appArmorProfile:
+          type: Unconfined
+        runAsUser: 70
+        runAsGroup: 70
+        fsGroup: 70
+        fsGroupChangePolicy: OnRootMismatch
+      initContainers:
+        - name: fix-permissions
+          image: {{ .Values.postgres.image }}
+          command:
+            - sh
+            - -c
+            - chown -R 70:70 /var/lib/postgresql/data &&
+              chmod 700 /var/lib/postgresql/data
+          securityContext:
+            runAsUser: 0
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          # Mandatory, not manners: the namespace ResourceQuota rejects any
+          # pod with a container missing them, init containers included.
+          resources:
+            requests:
+              memory: 32Mi
+              cpu: 10m
+            limits:
+              memory: 64Mi
+              cpu: 200m
       containers:
         - name: postgres
           image: {{ .Values.postgres.image }}
@@ -73,6 +110,16 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /var/lib/postgresql/data
+          # A liveness probe must not police startup. First boot runs initdb
+          # and fsyncs a fresh cluster to a drive that may be busy pulling
+          # model packs, which can exceed any sane liveness budget - and the
+          # kill leaves a half-written data directory that makes the next
+          # attempt slower still. See server/k8s/10-postgres.yaml.
+          startupProbe:
+            exec:
+              command: [sh, -c, "pg_isready -U postgres"]
+            periodSeconds: 10
+            failureThreshold: 30
           readinessProbe:
             exec:
               command: [sh, -c, "pg_isready -U postgres"]
@@ -81,7 +128,6 @@ spec:
           livenessProbe:
             exec:
               command: [sh, -c, "pg_isready -U postgres"]
-            initialDelaySeconds: 60
             periodSeconds: 30
       volumes:
         - name: data

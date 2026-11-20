@@ -42,6 +42,40 @@ spec:
       labels:
         app: litellm
     spec:
+      securityContext:
+        # Ubuntu 24.04's AppArmor will not let a container process signal
+        # its own child, and LiteLLM cannot start without doing so.
+        #
+        # On boot it shells out to the Prisma CLI, which spawns a
+        # schema-engine subprocess, does its work, and then calls kill()
+        # to shut it down. That kill fails:
+        #
+        #   [schema-engine] error: Error: kill EACCES
+        #       at ChildProcess.kill (node:internal/child_process)
+        #       at SchemaEngine.stop (.../prisma/build/index.js)
+        #     errno: -13, syscall: 'kill'
+        #
+        # The engine never exits, so the CLI never exits, so LiteLLM waits
+        # on it forever and port 4000 is never opened. Everything before
+        # that point succeeds - the migrations apply and the schema is
+        # reported up to date - which is what makes it so misleading: the
+        # pod sits at 0/1 Running, at zero CPU, having already finished
+        # the work it appears to be stuck on.
+        #
+        # The cause is the cri-containerd.apparmor.d profile denying
+        # signals to a peer in its &unconfined subprofile. It is the same
+        # defect that stops gosu reaching postgres in 10-postgres.yaml,
+        # and it is not specific to Prisma - any image whose entrypoint
+        # supervises a child process can hit it.
+        #
+        # Unconfined is a real reduction in isolation and worth stating
+        # plainly. It is acceptable here because these services are bound
+        # to loopback on a single-user workstation, the container is not
+        # privileged and does not run as root, and the alternative is
+        # shipping a patched host profile that every rebuild must
+        # reapply. See reference/troubleshooting.md.
+        appArmorProfile:
+          type: Unconfined
       containers:
         - name: litellm
           image: ghcr.io/berriai/litellm:main-stable

@@ -304,7 +304,26 @@ The trap is that the failure sustains itself. A liveness probe that fires during
 
 `startupProbe` exists for this. Liveness does not begin counting until it has succeeded once, so the two cases get separate budgets. Both manifests carry `periodSeconds: 10` with `failureThreshold: 90` — 900 seconds, over LiteLLM's own ceiling. Later boots have nothing to migrate and pass in under a minute, so it costs nothing in the normal case.
 
-If it was interrupted often enough to leave a half-applied migration, Prisma records it and then refuses to move:
+**That probe fix is necessary but not sufficient.** With it in place the pod stops restarting and simply hangs at `0/1 Running` forever, at zero CPU, with the log stopping mid-sentence. The cause is the AppArmor defect described in the next entry: Prisma finishes its work and then cannot kill its own schema-engine subprocess. Run the CLI by hand to see it, because LiteLLM swallows the error:
+
+```bash
+kubectl -n platform exec deploy/litellm -- sh -c \
+  'cd /app/.venv/lib/python3.*/site-packages/litellm_proxy_extras; \
+   timeout 90 /opt/prisma/binaries/node_modules/.bin/prisma migrate status --schema ./schema.prisma'
+```
+
+```
+Database schema is up to date!
+[schema-engine] error: Error: kill EACCES
+    at SchemaEngine.stop (.../prisma/build/index.js)
+  errno: -13, syscall: 'kill'
+```
+
+Note the order: the work succeeds, then the shutdown fails. `appArmorProfile: Unconfined` on the pod is the fix, and it is already in both the manifest and the chart.
+
+Do not reach for `DISABLE_SCHEMA_UPDATE=True`. It looks like it helps — the migration log lines disappear — but LiteLLM then runs `prisma migrate diff` to check for drift instead, which hangs in exactly the same place. It moves the symptom one step and wastes an afternoon.
+
+If a run was interrupted often enough to leave a half-applied migration, Prisma records it and then refuses to move:
 
 ```bash
 kubectl -n platform exec deploy/postgres -- psql -U postgres -d litellm \
@@ -340,7 +359,39 @@ securityContext:
 
 For a `hostPath` volume you also need an init container to `chown` the directory, because `fsGroup` does nothing there — the kubelet only manages ownership for volume plugins that support it, and `hostPath` is not one. `server/k8s/10-postgres.yaml` has a worked example of both halves.
 
-This affects any image using `gosu` or `su-exec`, so expect it in the Minecraft, n8n, LiteLLM and Open WebUI manifests if you change their images. Setting the pod's AppArmor profile to `Unconfined` also works and is the wrong trade: it disables the confinement for everything in the pod to fix one thirty-second privilege drop.
+This affects any image using `gosu` or `su-exec`, so expect it in the Minecraft, n8n and Open WebUI manifests if you change their images.
+
+### The same denial, the other shape: `kill EACCES`
+
+`runAsUser` only helps when the signal in question is the one sent during a startup privilege drop. The profile denies *all* cross-profile signals, so it equally breaks a long-running process that supervises a child — and there the symptom is different and much harder to read. Instead of a container that logs nothing, you get one that does its whole job, logs the success, and then hangs forever at zero CPU while shutting down.
+
+LiteLLM is the worked example. Prisma applies all 233 migrations, prints `Database schema is up to date!`, and then cannot terminate its own schema-engine:
+
+```
+[schema-engine] error: Error: kill EACCES
+  errno: -13, syscall: 'kill'
+```
+
+Postgres shows the third variant — it survives, but is denied the signals it uses internally:
+
+```
+apparmor="DENIED" operation="signal" comm="postgres" requested_mask="send" signal=urg
+```
+
+`SIGURG` is how one Postgres 16 backend wakes another's latch. Simple queries need no wakeup and return normally, so the database looks healthy while these fire several times a second.
+
+For these, `Unconfined` on the pod is the right answer rather than a shortcut:
+
+```yaml
+spec:
+  securityContext:
+    appArmorProfile:
+      type: Unconfined
+```
+
+The earlier advice here was that `Unconfined` is the wrong trade. That holds for the `gosu` case, where it disables confinement for the life of the pod to fix one thirty-second privilege drop. It does not hold when the denied signals are part of normal operation, because then there is nothing to sidestep — the alternatives are patching the host profile, which every containerd upgrade would silently revert, or not running the workload.
+
+How to tell which you are looking at: a container that logs **nothing at all** wants `runAsUser`; one that logs its work and then **hangs at zero CPU** wants `Unconfined`. Check with `cat /proc/1/stat | cut -d' ' -f14,15` twice a few seconds apart — identical numbers mean blocked, not slow.
 
 **`kubectl logs` and `kubectl exec` fail with `x509: certificate is valid for ... not <IP>`.**
 The node registered under one address and the kubelet's serving certificate was issued for another — typically because Tailscale was up when the node first registered, so the node advertises `100.x.y.z` while the certificate covers the LAN address. Everything that proxies through the kubelet breaks: `logs`, `exec`, `cp`, `top`. Scripts that pipe SQL in with `kubectl exec` fail in ways that look like SQL errors.

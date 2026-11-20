@@ -42,6 +42,15 @@ spec:
         # afternoon.
         checksum/config: {{ include "platform.litellmConfig" . | sha256sum }}
     spec:
+      # Ubuntu 24.04's AppArmor profile will not let a container process
+      # signal its own child. LiteLLM's Prisma CLI spawns a schema-engine,
+      # finishes its work, and then fails to kill it with EACCES - so the
+      # CLI never exits, LiteLLM waits on it forever, and port 4000 never
+      # opens. server/k8s/11-litellm.yaml has the full trace and the
+      # argument for why Unconfined is acceptable here.
+      securityContext:
+        appArmorProfile:
+          type: Unconfined
       containers:
         - name: litellm
           image: {{ .Values.litellm.image }}
