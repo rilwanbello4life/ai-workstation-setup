@@ -7,6 +7,7 @@
 #   ./reorganise-home.sh --apply    do it
 #   ./reorganise-home.sh --undo     put everything back
 #   ./reorganise-home.sh --check    list anything still pointing at an old path
+#   ./reorganise-home.sh --apply --force   ignore a stale running-job warning
 #
 # A 2 TB drive with a terabyte of weights, a dozen applications, game worlds,
 # study notes and a pile of half-finished project ideas becomes unnavigable
@@ -39,13 +40,14 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../ubuntu" && pwd)/common.sh"
 require_not_root
 
 MODE=plan
-NAME_STYLE=lower
+FORCE=no
 
 while (( $# )); do
     case "$1" in
         --apply)   MODE=apply; shift ;;
         --undo)    MODE=undo;  shift ;;
         --check)   MODE=check; shift ;;
+        --force)   FORCE=yes; shift ;;
         -h|--help) sed -n '2,30p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) die "Unknown option: $1 (try --help)" ;;
     esac
@@ -146,21 +148,45 @@ short() { printf '%s' "${1/#$HOME/\~}"; }
 # descriptor and carries on writing into a directory that no longer has the
 # name anyone else is looking for. You would find out hours later.
 busy_check() {
-    local busy=() pat
-    for pat in '07-strata.sh' '10-models.sh' 'download-models.sh' \
-               'strata launch' 'ComfyUI/main.py' 'llama-server' 'server.py'; do
-        pgrep -af -- "$pat" >/dev/null 2>&1 && busy+=("$pat")
+    local busy=() pat line
+
+    # Matching on the command line alone is not enough. The tmux server keeps
+    # the whole pane command in its own argv, so a job that finished hours
+    # ago still shows up as "07-strata.sh" forever after - which reads as a
+    # download in progress and refuses a migration that is perfectly safe.
+    # Drop tmux's own process, and this script's.
+    #
+    # A real job is still caught: a running ./07-strata.sh appears as its own
+    # bash process whose argv names the script and does not mention tmux.
+    for pat in '07-strata\.sh' '10-models\.sh' 'download-models\.sh' \
+               'strata launch' 'ComfyUI/main\.py' 'llama-server'; do
+        while IFS= read -r line; do
+            [[ -n "$line" ]] || continue
+            case "$line" in
+                *tmux*|*reorganise-home.sh*|*pgrep*) continue ;;
+            esac
+            busy+=("$line")
+        done < <(pgrep -af -- "$pat" 2>/dev/null || true)
     done
 
-    # hf on its own, because the pattern is short enough to match this script.
-    pgrep -x hf >/dev/null 2>&1 && busy+=("hf")
+    # hf by exact name: as a substring it matches far too much.
+    while IFS= read -r line; do
+        [[ -n "$line" ]] && busy+=("$line")
+    done < <(pgrep -a -x hf 2>/dev/null || true)
+
+    if (( ${#busy[@]} )) && [[ "$FORCE" != yes ]]; then
+        err "Something looks like it is still using these paths:"
+        # The actual process, not the pattern that matched it, so a false
+        # positive is obvious rather than mysterious.
+        printf '      %s\n' "${busy[@]}" | sort -u
+        echo
+        err "Let it finish first.  Attach with:  tmux attach -t dl"
+        err "If that list is stale, re-run with --force."
+        die "Nothing has been changed."
+    fi
 
     if (( ${#busy[@]} )); then
-        err "Something is still using these paths:"
-        printf '      %s\n' "${busy[@]}"
-        echo
-        err "Let the downloads finish first. Check with:  tmux attach -t dl"
-        die "Nothing has been changed."
+        warn "Ignoring the running-job check because --force was given."
     fi
 
     if systemctl --user is-active --quiet voice-server.service 2>/dev/null; then
