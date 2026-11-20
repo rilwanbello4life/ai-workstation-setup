@@ -28,6 +28,12 @@ metadata:
   namespace: {{ .Values.namespace }}
 spec:
   replicas: 1
+  strategy:
+    # Recreate: a rolling update surges a second pod that blocks on the
+    # Prisma migration lock the first pod is holding, while the first pod
+    # is never allowed to finish. Both sit at 0/1 forever. See
+    # server/k8s/11-litellm.yaml.
+    type: Recreate
   selector:
     matchLabels:
       app: litellm

@@ -34,6 +34,18 @@ metadata:
   namespace: platform
 spec:
   replicas: 1
+  strategy:
+    # Recreate, not RollingUpdate. On boot LiteLLM takes a Prisma migration
+    # lock in Postgres. A rolling update surges a second pod before the
+    # first is ready, and because the first is not ready precisely because
+    # it is mid-migration, the new pod blocks on a lock the old pod is
+    # holding while the old pod is never allowed to finish.
+    #
+    # The deployment then sits with two pods at 0/1 forever, each log
+    # showing half the story - one "Acquired the Prisma migration lock",
+    # the other "Waiting for the Prisma migration lock". A second replica
+    # buys nothing here anyway: there is one node and one database.
+    type: Recreate
   selector:
     matchLabels:
       app: litellm
