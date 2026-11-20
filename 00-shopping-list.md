@@ -36,9 +36,9 @@ This becomes the **entire Ubuntu system**: root filesystem, its own EFI partitio
 
 #### 2 TB or 4 TB — buy 4 TB
 
-A 2 TB drive does fit the realistic build. At 64 GB of RAM the server stack caps you at IQ2_XS, so you would install two or three Strata packs rather than the full 677 GB catalogue — call it 900 GB of real usage against 1 863 GiB, under half full.
+A 2 TB drive does fit the realistic build. At 64 GB of RAM the server stack caps you at IQ2_XS, so you would install two or three Strata packs rather than the full 673 GB catalogue — call it 900 GB of real usage against 1 863 GiB, under half full.
 
-*As built this reasoning held, but only just: the whole catalogue was installed anyway and the drive is comfortable at ~1 135 GB. What a 96 GB machine changes is that the packs above IQ3_S become runnable, and those are another 111–130 GB each — which is the first thing on this drive with nowhere to go.*
+*As built this reasoning did not hold. Every pack through tier E was installed rather than two or three, and the three that a 96 GB machine adds above IQ3_S are 94, 111 and 128 GB — ~333 GB that takes the drive to ~1 464 GB and the Steam library down to ~213 GB. The 2 TB drive works, but gaming is what pays for it.*
 
 The reason to buy 4 TB anyway is that **this machine has no spare drive bay in practice.** M.2_1 holds Windows, M.2_2 takes this drive, and M.2_3 disables the PCIe x16 slot you are keeping for a capture card or 10GbE NIC. So the drive you buy now is the drive you have, and growing later means replacing it rather than adding to it.
 

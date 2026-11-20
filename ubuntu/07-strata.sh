@@ -1,45 +1,60 @@
 #!/usr/bin/env bash
 # Phase 8.7 - Strata: install every model this machine can run.
 #
-# Strata serves three base models. Most of what looks like a long model list is
-# one model at different precision:
+# Strata groups its models into seven families. A family is a base model plus
+# the people who quantised it, and the "model" within a family is a precision,
+# not a different network. Verified against this install with --catalogue:
 #
-#   Qwen3.8-Flash-Next   125B MoE, 512 experts per layer, 10 routed + 1 shared
-#                        active per token. The ~2% activation rate is why a
-#                        125B model runs on a 16 GB card: hot experts in VRAM,
-#                        the rest in RAM, a 29 GB n-gram table on the SSD.
-#   Qwen3.6-35B-A3B      35B MoE, 3B active, Apache 2.0. The general-purpose
-#                        companion to Coder, which is weak outside code.
-#   DeepSeek V4.1-Flash  needs 46 GB RAM and 257 GB of disk. Not for 32 GB.
+#   qwen     Qwen3.8-Flash-Next            Q2_0, IQ2_XS, IQ3_XXS, IQ3_S
+#   unsloth  Qwen3.8-Flash-Next (Unsloth)  12 sizes, UD-IQ1_M up to Q8_0
+#   nvfp4    Qwen3.8-Flash-Next (NVFP4)    NVFP4, NVFP4-NVIDIA, NVFP4-QAD
+#   gyro     Qwen3.8-Flash-Next (Gyro)     Gyro-S, Gyro-M
+#   coder    Qwen3.8-Flash-Next Coder      IQ1_M
+#   swift    Swift 1.5                     IQ2_XS, IQ3_XXS, IQ3_S
+#   qwen36   Qwen3.6-35B-A3B               UD-Q4_K_XL, UD-Q6_K_XL, Q8_0
+#
+# Flash-Next is a 125B MoE, 512 experts per layer, 10 routed + 1 shared active
+# per token. The ~2% activation rate is why it runs on a 16 GB card at all:
+# hot experts in VRAM, the rest in RAM, a 29 GB n-gram table on the SSD.
+# Qwen3.6-35B-A3B is 35B MoE, 3B active, Apache 2.0 - the general-purpose
+# companion to Coder, which is weak outside code.
+#
+# The family matters. UD-Q4_K_XL exists in both 'unsloth' and 'qwen36' and is
+# a different model in each; asking 'qwen' for a UD- size is rejected, because
+# the Unsloth quants are their own family. Get it wrong and Strata answers
+# "<Family> has no size <Model>", which is what --catalogue is for.
 #
 # Tiers, by what this machine can actually do:
 #
 #   A  runs well            Coder, Qwen3.6 UD-Q4_K_XL, Gyro-S      ~150 GB
 #   B  tight but viable     Gyro-M, Qwen3.6 UD-Q6_K_XL            ~125 GB
 #   C  SSD-streamed, slow   Flash-Next Q2_0, IQ2_XS               ~142 GB
-#   D  needs 64 GB RAM      Q2_0, IQ2_XS, IQ3_XXS, Swift, Q8_0    ~326 GB
+#   D  needs 64 GB RAM      Q2_0, IQ2_XS, IQ3_XXS, Swift, Q8_0    ~322 GB
 #   E  needs 64 GB, tight   IQ3_S                                  ~76 GB
-#   F  needs 96 GB          UD-IQ4_XS                             ~111 GB
-#   G  96 GB + 'ai-pause'    UD-Q4_K_XL, NVFP4                     ~210 GB
+#   F  needs 96 GB          Unsloth UD-IQ4_XS                      ~94 GB
+#   G  96 GB + 'ai-pause'   Unsloth UD-Q4_K_XL, NVFP4             ~239 GB
 #
 # Tiers F and G exist only in the 96 GB "add" configuration from phase 11.
 # F is the best pack that still loads with the cluster running; G needs the
 # cluster stopped with 'ai-pause' first, which is why it is a separate letter
 # rather than more of F.
 #
-# '--tier all' is now all seven letters, about 998 GB, which is everything
-# this machine can run. That leaves roughly 220 GB for a Steam library on the
-# 2 TB drive - the trade is deliberate and documented in
-# reference/partition-layout.md. Use '--tier abcdef' to stop at 788 GB.
+# Every size above is measured, not estimated - each one is the "About N GB to
+# download" line from 'strata launch --plan' for that exact family and model.
+# Re-measure at any time with --catalogue, which asks Strata rather than
+# trusting this table.
 #
-# NVFP4's download size is not published; the 80 GB in the table is an
-# estimate used for the disk guard. Confirm the exact pack names on your
-# install with 'strata models list' before relying on tier G.
+# '--tier all' is all seven letters, about 1006 GB. That leaves roughly 213 GB
+# for a Steam library on the 2 TB drive - the trade is deliberate and
+# documented in reference/partition-layout.md. '--tier abcdef' stops at
+# 767 GB and keeps about 452 GB of games.
 #
-# Deliberately absent at any tier: DeepSeek V4.1-Flash. It runs - memory is
-# not the problem - but it is 257 GB for about 5 tok/s with an 8K context
-# cap, and it does not fit alongside tier G on a 2 TB drive. See
-# reference/4tb-upgrade.md.
+# What '--tier all' is NOT is the whole catalogue. Strata offers 28 family and
+# model combinations; the table below installs 14 of them. The other 14 are
+# mostly larger Unsloth quants and the two remaining NVFP4 variants, and they
+# would need well over another terabyte. The drive, not Strata, is the limit.
+# '--catalogue' lists all 28 with their real download sizes so the choice can
+# be made on numbers.
 #
 # Prints a plan and changes nothing unless you pass --install.
 #
@@ -54,7 +69,7 @@ DO_INSTALL=no
 ASSUME_YES=no
 
 usage() {
-    sed -n '2,26p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    sed -n '2,57p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
     cat <<'EOF'
 
 Usage:
@@ -70,6 +85,8 @@ Usage:
   ./07-strata.sh --status             what is downloaded, what is left
   ./07-strata.sh --tier all --reconcile
                                       record packs Strata already has
+  ./07-strata.sh --catalogue          every family and size Strata offers,
+                                      with measured download sizes
 
 Options:
   --tier LETTERS   any combination of a b c d e f g, or "all"  (default: a)
@@ -82,6 +99,10 @@ Options:
   --retry-failed   re-attempt entries the ledger records as failed (default)
   --skip-failed    leave previously failed entries alone
   --status         print the ledger and exit, changing nothing
+  --catalogue      ask Strata for every family and size it offers, measure
+                   each one with --plan, and show which tier installs it.
+                   Read-only: it downloads nothing and changes nothing.
+                   This is the authority; the table in this script is a copy.
   -y, --yes        do not ask before each model
 
 Anything recorded as downloaded is skipped outright on the next run - not
@@ -95,6 +116,7 @@ DOWNLOAD_ONLY=no
 SKIP_FAILED=no
 SHOW_STATUS=no
 RECONCILE=no
+CATALOGUE=no
 
 while (( $# )); do
     case "$1" in
@@ -105,6 +127,7 @@ while (( $# )); do
         --skip-failed)   SKIP_FAILED=yes; shift ;;
         --status)        SHOW_STATUS=yes; shift ;;
         --reconcile)     RECONCILE=yes; shift ;;
+        --catalogue)     CATALOGUE=yes; shift ;;
         -y|--yes)        ASSUME_YES=yes; shift ;;
         -h|--help)       usage; exit 0 ;;
         *) die "Unknown option: $1 (try --help)" ;;
@@ -176,6 +199,15 @@ fi
 section "The model plan"
 
 # family | model | tier | GB | description
+#
+# The family column is load-bearing and is the one thing here that cannot be
+# guessed. Strata validates the model name before the family, so a wrong
+# family does not fail until the launch itself, with a message that reads
+# like the model is missing rather than misfiled. The Unsloth UD- quants and
+# the NVFP4 variants are their own families, not sizes of 'qwen'.
+#
+# GB is the measured download size from 'strata launch --plan', not an
+# estimate. Re-check the whole table against Strata with --catalogue.
 MODELS=(
     "coder|IQ1_M|a|68|Flash-Next Coder - coding instrument, 55 tok/s"
     "qwen36|UD-Q4_K_XL|a|23|Qwen3.6-35B-A3B 4-bit - general purpose, Apache 2.0"
@@ -185,13 +217,153 @@ MODELS=(
     "qwen|q2_0|cd|70|Flash-Next Q2_0 - 94 tok/s, needs 44 GB RAM"
     "qwen|iq2_xs|cd|72|Flash-Next IQ2_XS - the default; largest that fits with the cluster up"
     "qwen|iq3_xxs|d|74|Flash-Next IQ3_XXS - needs 53 GB RAM"
-    "swift|IQ2_XS|d|72|Swift 1.5 - IQ2_XS quality, much shorter thinking"
+    "swift|IQ2_XS|d|68|Swift 1.5 - IQ2_XS quality, much shorter thinking"
     "qwen36|Q8_0|d|38|Qwen3.6 8-bit - closest to the full 35B"
     "qwen|iq3_s|e|76|Flash-Next IQ3_S - 50 GB of experts, 53 tok/s"
-    "qwen|UD-IQ4_XS|f|111|Unsloth UD-IQ4_XS - 62 GB of experts, 96 GB only"
-    "qwen|UD-Q4_K_XL|g|130|Unsloth UD-Q4_K_XL - 78 GB of experts, needs ai-pause"
-    "qwen|NVFP4|g|80|NVFP4 - 70 GB of experts, FP4 tensor cores; size estimated"
+    "unsloth|UD-IQ4_XS|f|94|Unsloth UD-IQ4_XS - 62 GB of experts, 96 GB only"
+    "unsloth|UD-Q4_K_XL|g|111|Unsloth UD-Q4_K_XL - 78 GB of experts, needs ai-pause"
+    "nvfp4|NVFP4|g|128|NVFP4 - 70 GB of experts, FP4 tensor cores"
 )
+
+# ---------------------------------------------------------------------------
+# --catalogue: ask Strata what it offers and what each pack costs, rather
+# than trusting the table above.
+#
+# Strata has no "list everything" command, but its error messages are exact
+# and cost nothing to produce:
+#
+#   --family <nonsense>         "There is no model family called 'x'.
+#                                Families: ..."
+#   --model  <nonsense>         "There is no model called 'x'. Models: ..."
+#   valid model, wrong family   "<Family> has no size <M>. It offers: ..."
+#
+# Only the third gives a per-family list, and it needs a model the family
+# does not have - so each family is probed with names from the global list
+# until one is rejected. No two families share an identical size list, so
+# this always terminates, usually on the first probe.
+#
+# Every pair then gets --plan, which downloads nothing, changes nothing and
+# states the exact transfer size. That is where the GB column in MODELS came
+# from. Three of those numbers were estimates once, and all three were wrong
+# by 17 to 48 GB, so the table is now derived from this and not from reading.
+
+# "<prefix>: a, b, c." on stdin -> "a b c"
+_csv_after() {
+    sed -n "s/.*$1: \(.*\)\./\1/p" | tr -d ' ' | tr ',' ' '
+}
+
+# Which tier, if any, installs this pair.
+_kit_tier() {
+    local want f m t g d e
+    want="$(tr '[:upper:]' '[:lower:]' <<<"$1")"
+    for e in "${MODELS[@]}"; do
+        IFS='|' read -r f m t g d <<<"$e"
+        if [[ "$(tr '[:upper:]' '[:lower:]' <<<"${f}/${m}")" == "$want" ]]; then
+            printf 'tier %s' "${t^^}"
+            return 0
+        fi
+    done
+    printf -- '-'
+}
+
+catalogue() {
+    local families all_models fam mod probe out offers pack dl tier
+    local n=0 kept=0 sum=0
+
+    have strata || die "strata is not installed, so there is nothing to ask."
+
+    # Capture, then parse. Strata exits non-zero when it rejects a name, and
+    # piping it straight into the parser puts that failure at the head of a
+    # pipeline under 'set -o pipefail' - which aborts the whole script with
+    # no message at all, since the error text went into the substitution.
+    info "Reading Strata's family list."
+    out="$(strata launch --family __catalogue__ --model Q2_0 --plan 2>&1 || true)"
+    families="$(_csv_after 'Families' <<<"$out")"
+    [[ -n "$families" ]] || die "Could not read the family list from Strata."
+
+    info "Reading Strata's model list."
+    out="$(strata launch --family qwen --model __catalogue__ --plan 2>&1 || true)"
+    all_models="$(_csv_after 'Models' <<<"$out")"
+    [[ -n "$all_models" ]] || die "Could not read the model list from Strata."
+
+    info "Measuring each pack with --plan. Nothing is downloaded."
+    echo
+    printf '  %-8s %-15s %7s %11s  %s\n' FAMILY MODEL PACK DOWNLOAD 'INSTALLED BY'
+    printf '  %-8s %-15s %7s %11s  %s\n' -------- --------------- ------- ----------- ------------
+
+    for fam in $families; do
+        offers=""
+        for probe in $all_models; do
+            out="$(strata launch --family "$fam" --model "$probe" --plan 2>&1 || true)"
+            if [[ "$out" == *"has no size"* ]]; then
+                offers="$(_csv_after 'It offers' <<<"$out")"
+                break
+            fi
+        done
+        if [[ -z "$offers" ]]; then
+            warn "$fam: could not determine its size list; skipped."
+            continue
+        fi
+
+        for mod in $offers; do
+            out="$(strata launch --family "$fam" --model "$mod" --plan 2>&1 || true)"
+            # awk with an explicit exit, rather than sed piped through head.
+            # Under 'set -o pipefail' a head that finishes first can SIGPIPE
+            # the sed feeding it and fail the whole substitution - a failure
+            # that depends on scheduling, so it would pass in testing and
+            # break later. awk stops itself and needs no pipeline.
+            #
+            #   model     Qwen3.8-Flash-Next (Unsloth) UD-IQ4_XS, 94 GB
+            pack="$(awk -F', ' '/^ *model / {
+                        split($NF, a, " ")
+                        if (a[2] == "GB") { print a[1]; exit }
+                    }' <<<"$out")"
+            if [[ "$out" == *"Nothing to download"* ]]; then
+                dl="on disk"
+                kept=$(( kept + 1 ))
+            else
+                #   download  About 93.7 GB to download: the model (93.7 GB).
+                dl="$(awk '/About .* GB to download/ {
+                          for (i = 1; i < NF; i++)
+                              if ($i == "About") { print $(i+1); exit }
+                      }' <<<"$out")"
+                if [[ -n "$dl" ]]; then
+                    sum="$(awk -v a="$sum" -v b="$dl" 'BEGIN { printf "%.0f", a + b }')"
+                    dl="${dl} GB"
+                else
+                    dl="?"
+                fi
+            fi
+            tier="$(_kit_tier "${fam}/${mod}")"
+            printf '  %-8s %-15s %6sG %11s  %s\n' \
+                   "$fam" "$mod" "${pack:-?}" "$dl" "$tier"
+            n=$(( n + 1 ))
+        done
+    done
+
+    echo
+    info "$n family/model combinations, $kept already on this computer."
+    info "Fetching every one of the rest would transfer about ${sum} GB."
+    cat <<EOF
+
+  A dash in the last column means no tier installs it. That is a disk
+  decision, not an oversight: this drive cannot hold the whole catalogue,
+  and '--tier all' is already ~1006 GB of it. Add one deliberately with
+
+      strata launch --family FAMILY --model MODEL --yes --no-tui
+
+  and it will be picked up by '--tier all --reconcile' afterwards.
+
+  Where PACK and DOWNLOAD differ, DOWNLOAD is what crosses the network and
+  PACK is what Strata reports as the loaded size. Budget on DOWNLOAD.
+EOF
+}
+
+if [[ "$CATALOGUE" == yes ]]; then
+    section "Strata's real catalogue"
+    catalogue
+    exit 0
+fi
 
 selected=()
 total=0
@@ -240,8 +412,10 @@ strata_rows() {
 # when it belongs to the default family, and after family and model
 # otherwise: Coder appears as coder-iq1_m, but plain Flash-Next IQ2_XS is
 # just iq2_xs rather than qwen-iq2_xs. Preset first, then the bare model name
-# but only when exactly one pack claims it - so qwen/UD-Q4_K_XL is not
-# matched by qwen36-ud-q4_k_xl, which is a different model of the same name.
+# but only when exactly one pack claims it - so unsloth/UD-Q4_K_XL is not
+# matched by qwen36-ud-q4_k_xl, which is a genuinely different model that
+# happens to carry the same size name. Two families offering UD-Q4_K_XL is
+# not hypothetical; it is why the bare-name rule needs the uniqueness test.
 strata_present() {
     local preset="$1" bare="$2" listing="$3" hit
 
@@ -308,7 +482,7 @@ fi
 reconcile_ledger
 
 # What is actually left to fetch. Sizing the check by the full plan is what
-# the first version did, and on this machine that reads as 1004 GB wanted
+# the first version did, and on this machine that reads as 1006 GB wanted
 # against 615 GB spendable - so it refuses to start a download that is
 # really 321 GB and fits with room to spare.
 remaining=0
@@ -342,11 +516,11 @@ fi
 
 # Tier F needs the 96 GB configuration. Downloading it on less is legitimate
 # - packs are fetched once and the memory upgrade is phase 11 - but it should
-# be a choice rather than a surprise, because it is 111 GB that cannot load
+# be a choice rather than a surprise, because it is 94 GB that cannot load
 # until the DIMMs are in. This warns and continues; it does not block, since
 # pre-downloading before the RAM arrives is the normal reason to be here.
 if [[ "$TIERS" == *f* ]] && (( ram_gb < 90 )); then
-    warn "Tier F (UD-IQ4_XS, ~111 GB) needs ~72 GB of RAM; this machine reports ${ram_gb} GB."
+    warn "Tier F (Unsloth UD-IQ4_XS, ~94 GB) needs ~72 GB of RAM; this machine reports ${ram_gb} GB."
     warn "The download will complete and is kept. The verify step that follows"
     warn "it will then be killed for running out of memory - that is expected"
     warn "here, and is reported as a failure at the end rather than hidden."
@@ -359,14 +533,13 @@ fi
 # this warns rather than blocks, exactly as tier F does.
 if [[ "$TIERS" == *g* ]]; then
     if (( ram_gb < 90 )); then
-        warn "Tier G (UD-Q4_K_XL and NVFP4, ~210 GB) needs 80-88 GB; this machine reports ${ram_gb} GB."
+        warn "Tier G (UD-Q4_K_XL and NVFP4, ~239 GB) needs 80-88 GB; this machine reports ${ram_gb} GB."
         warn "Both will download and the downloads are kept, but the verify step"
         warn "after each one will be killed for running out of memory until the"
         warn "memory upgrade is fitted."
     fi
     warn "Tier G does not load with the cluster running, at any memory size."
     warn "Stop it first with 'ai-pause --cluster', then launch the pack."
-    warn "NVFP4's download size is an estimate; check 'strata models list' if it fails."
 fi
 
 # ---------------------------------------------------------------------------
@@ -380,7 +553,7 @@ if (( ram_gb < 42 )); then
     Marginal         Coder, Gyro-S                            (tier A)
     Tight            Gyro-M                                   (tier B)
     SSD-streamed     Flash-Next Q2_0 and IQ2_XS - much slower (tier C)
-    Will not run     IQ3_XXS, IQ3_S, Swift, Unsloth, NVFP4, DeepSeek
+    Will not run     IQ3_XXS, IQ3_S, Swift, Unsloth, NVFP4
 
   The fit rule for Flash-Next is: RAM must hold the experts plus about 10 GB
   for the OS. Coder needs 23 GB of experts, Q2_0 needs 34 GB, IQ3_S needs 50.
@@ -408,18 +581,18 @@ elif (( ram_gb < 90 )); then
   modules at the full DDR5-6000. You trade the top of the catalogue for about
   a fifth more memory bandwidth than the four-DIMM alternative.
 
-  Tiers A-E are ~677 GB and budgeted for on this drive - install them with
+  Tiers A-E are ~673 GB and budgeted for on this drive - install them with
   '--tier abcde'. Tier F needs 96 GB and will not load in this configuration,
-  so '--tier all' would spend 111 GB on a pack you cannot use yet.
+  so '--tier all' would spend 94 GB on a pack you cannot use yet.
 
   Memory, not disk, is what decides which of them you can run: IQ2_XS is
   the largest that works with the cluster up, and the rest need
   'ai-pause --cluster' first. Having them all resident is what makes
   switching modes a relaunch instead of a 76 GB download.
 
-  Still out of reach: Unsloth needs 72-136 GB, NVFP4 about 80 GB. DeepSeek
-  V4.1-Flash will start, but measures ~5 tok/s on this class of card and
-  wants 257 GB of disk.
+  Still out of reach: the Unsloth family needs 72-136 GB of RAM and NVFP4
+  about 80 GB. Both are their own families rather than sizes of Flash-Next -
+  see '--catalogue'.
 
 EOF
 else
@@ -433,30 +606,32 @@ else
   ranks are the least forgiving thing AM5 does, and marginal memory corrupts
   data quietly rather than failing visibly.
 
-  Tiers A-E are ~677 GB. Three more packs need this memory configuration,
+  Tiers A-E are ~673 GB. Three more packs need this memory configuration,
   and all three are now installed by '--tier all':
 
-    F  UD-IQ4_XS   ~62 GB experts, ~111 GB download  - cluster up, 6 GB margin
-    G  UD-Q4_K_XL  ~78 GB experts, ~130 GB download  - after 'ai-pause'
-    G  NVFP4       ~70 GB experts, ~80 GB estimated  - after 'ai-pause'
+    F  unsloth/UD-IQ4_XS   ~62 GB experts,  94 GB download - cluster up
+    G  unsloth/UD-Q4_K_XL  ~78 GB experts, 111 GB download - after 'ai-pause'
+    G  nvfp4/NVFP4         ~70 GB experts, 128 GB download - after 'ai-pause'
+
+  Note the families. These are not sizes of Flash-Next: the Unsloth quants
+  and the NVFP4 variants are separate families, and asking 'qwen' for them
+  is rejected. The download figures are measured with 'strata launch --plan',
+  which is what '--catalogue' does for the whole catalogue.
 
   F and G differ only in whether the platform has to be stopped first. At
   96 GB, tier F loads alongside the cluster; tier G needs its ~15 GB back.
 
-  '--tier all' is therefore ~998 GB, every pack this machine can execute.
-  That leaves roughly 221 GB for the Steam library instead of 542 GB, which
+  '--tier all' is therefore ~1006 GB, every pack this machine can execute.
+  That leaves roughly 213 GB for the Steam library instead of 546 GB, which
   is a real trade and the reason it is spelled out here rather than buried
-  in the total. '--tier abcdef' stops at 788 GB and keeps 431 GB of games.
+  in the total. '--tier abcdef' stops at 767 GB and keeps 452 GB of games.
 
-  NVFP4 publishes no download size; the 80 GB above is an estimate for the
-  disk guard. Check 'strata models list' if the install cannot find it.
+  Still out of reach on memory: the Qwen3.6 Q8_0 class at ~136 GB, and the
+  larger Unsloth quants above UD-Q4_K_XL.
 
-  Not included at any tier: DeepSeek V4.1-Flash. Memory is not the problem -
-  it is 257 GB for about 5 tok/s with an 8K context cap, and it no longer
-  fits beside tier G on this drive. See reference/4tb-upgrade.md.
-
-  Still out of reach: Qwen3.6 Q8_0 class at ~136 GB. DeepSeek V4.1-Flash fits
-  in memory but measures ~5 tok/s on this card and wants 257 GB of disk.
+  Out of reach on disk: the other 14 of Strata's 28 family/model pairs.
+  '--tier all' is everything this drive can hold, not everything Strata
+  offers. Run '--catalogue' to see the rest with their real sizes.
 
 EOF
 fi

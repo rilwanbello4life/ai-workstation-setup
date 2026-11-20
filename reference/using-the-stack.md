@@ -34,7 +34,7 @@ Switching models is `--preset <name>` and costs one to three minutes. You do not
 
 ### Installing a pack you do not have yet
 
-Check the fit before you commit to a download that may be 111 GB:
+Check the fit before you commit to a download that may be 128 GB:
 
 ```bash
 strata launch --plan --family coder --model IQ1_M

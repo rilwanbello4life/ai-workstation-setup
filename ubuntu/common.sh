@@ -288,7 +288,7 @@ EOF
 # Tab-separated, one row per entry, last row wins:
 #
 #   kind    id                      status  when                 note
-#   strata  qwen/UD-IQ4_XS          ok      2026-11-19T20:14:02  downloaded
+#   strata  unsloth/UD-IQ4_XS       ok      2026-11-19T20:14:02  downloaded
 #   file    bartowski/x::y.gguf     failed  2026-11-19T20:31:55  hf exit 1
 #
 # models/download-models.sh writes the same format without sourcing this

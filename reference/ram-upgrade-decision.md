@@ -230,9 +230,9 @@ Two mitigations cost nothing:
 
 ## What to download
 
-`--tier all` is ~998 GB: tiers A-E at 677 GB, UD-IQ4_XS at 111 GB as tier F, and UD-Q4_K_XL plus NVFP4 at ~210 GB as tier G. Install all of it regardless of which memory configuration you land on — packs are fetched once, and having every one resident is what makes switching modes a one-liner rather than a 76 GB wait.
+`--tier all` is ~1 006 GB: tiers A-E at 673 GB, `unsloth/UD-IQ4_XS` at 94 GB as tier F, and `unsloth/UD-Q4_K_XL` plus `nvfp4/NVFP4` at 239 GB as tier G. Install all of it regardless of which memory configuration you land on — packs are fetched once, and having every one resident is what makes switching modes a one-liner rather than a 76 GB wait.
 
-Tier F only *loads* in the 96 GB configuration. Downloading it on 64 GB, or before the DIMMs are fitted, is fine and the installer says so; it simply sits on disk until the memory is there. Use `--tier abcdef` to stop at 788 GB and keep 431 GB for Steam, or `--tier abcde` for 677 GB and 542 GB.
+Tier F only *loads* in the 96 GB configuration. Downloading it on 64 GB, or before the DIMMs are fitted, is fine and the installer says so; it simply sits on disk until the memory is there. Use `--tier abcdef` to stop at 767 GB and keep 452 GB for Steam, or `--tier abcde` for 673 GB and 546 GB.
 
 ```bash
 cd ai-workstation-setup/ubuntu
@@ -240,14 +240,14 @@ cd ai-workstation-setup/ubuntu
 ./07-strata.sh --tier de --install
 ```
 
-### Comfortable — tier D, ~326 GB
+### Comfortable — tier D, ~322 GB
 
 | Pack | Command | Download | Speed |
 |---|---|---:|---|
 | Flash-Next **Q2_0** | `--family qwen --model q2_0` | ~70 GB | **94 tok/s** — the fast one |
 | Flash-Next **IQ2_XS** | `--family qwen --model iq2_xs` | ~72 GB | 79 tok/s |
 | Flash-Next **IQ3_XXS** | `--family qwen --model iq3_xxs` | ~74 GB | 62 tok/s |
-| **Swift 1.5** IQ2_XS | `--family swift --model IQ2_XS` | ~72 GB | as IQ2_XS, thinks far shorter |
+| **Swift 1.5** IQ2_XS | `--family swift --model IQ2_XS` | ~68 GB | as IQ2_XS, thinks far shorter |
 | **Qwen3.6** Q8_0 | `--family qwen36 --model Q8_0` | 37.8 GB | closest to the full 35B |
 
 Q2_0 is where quality falls off: perplexity jumps about 10% against the Q8_0 reference, while everything above it stays within 2%.
@@ -264,23 +264,27 @@ IQ3_S matches the full model on the published tests and is the slowest of the li
 
 ### Beyond tier E — only at 96 GB
 
-UD-IQ4_XS is tier F and comes with `--tier all`. The other two are not in the tier letters, and fetching them is a deliberate manual step once the memory configuration is proven.
+All three now come with `--tier all`: `unsloth/UD-IQ4_XS` as tier F, and `unsloth/UD-Q4_K_XL` and `nvfp4/NVFP4` as tier G. The only difference between the letters is whether the cluster has to be stopped first.
 
 | Pack | Experts | Download | When |
 |---|---:|---:|---|
-| Unsloth UD-IQ4_XS | ~62 GB | ~111 GB | **tier F, in `--tier all`.** Cluster up, 6 GB margin — measure before trusting |
-| NVFP4 | ~70 GB | — | by hand, after `ai-pause`; the FP4 tensor cores finally earn their keep |
-| Unsloth UD-Q4_K_XL | ~78 GB | ~130 GB | by hand, after `ai-pause`, 5 GB margin |
+| `unsloth/UD-IQ4_XS` | ~62 GB | 94 GB | **tier F.** Cluster up, 6 GB margin — measure before trusting |
+| `unsloth/UD-Q4_K_XL` | ~78 GB | 111 GB | **tier G.** After `ai-pause`, 5 GB margin |
+| `nvfp4/NVFP4` | ~70 GB | 128 GB | **tier G.** After `ai-pause`; the FP4 tensor cores finally earn their keep |
 
-**Disk becomes the constraint here, not memory.** All seven tiers come to 998 GB and leave about 221 GB for Steam. That is the trade `--tier all` makes; [partition-layout.md](partition-layout.md) has the arithmetic and [4tb-upgrade.md](4tb-upgrade.md) what a larger drive would buy back.
+Mind the families. `unsloth` and `nvfp4` are their own families, not sizes of `qwen` — asking `qwen` for `UD-IQ4_XS` is rejected outright. The download figures are measured from `strata launch --plan`, not estimated; the earlier estimates on this page were out by 17 to 48 GB, and NVFP4 was the worst of them at an assumed 80 GB against an actual 128 GB.
+
+**Disk becomes the constraint here, not memory.** All seven tiers come to 1 006 GB and leave about 213 GB for Steam. That is the trade `--tier all` makes; [partition-layout.md](partition-layout.md) has the arithmetic and [4tb-upgrade.md](4tb-upgrade.md) what a larger drive would buy back.
 
 ## What neither configuration reaches
 
 | Pack | Needs | Gap |
 |---|---:|---|
-| Qwen3.6 Q8_0 class | ~136 GB RAM | not without 128 GB and then some |
-| DeepSeek V4.1-Flash | 46 GB RAM, **257 GB disk** | memory is fine at either tier; disk and ~5 tok/s are not |
+| Qwen3.6 `Q8_0` at full precision | ~136 GB RAM | not without 128 GB and then some |
+| `unsloth` sizes above `UD-Q4_K_XL` | 96 GB+ RAM | `UD-Q5_K_XL`, `UD-Q6_K_XL` and `Q8_0` of the 125B exceed what even the add configuration holds, and each is larger on disk than NVFP4's 128 GB |
 
-DeepSeek is the judgement call. It *will* start on 64 GB, let alone 96. At five tokens a second and a quarter-terabyte download on a 2 TB drive, it is a curiosity rather than a tool on this hardware. It is itemised in [4tb-upgrade.md](4tb-upgrade.md).
+Memory is no longer the interesting limit at the top of the catalogue — disk is. Strata offers 28 family/model combinations and `--tier all` installs 14; the remainder is a trade against the Steam library rather than a hardware gap. `./07-strata.sh --catalogue` lists all 28 with measured sizes, and [4tb-upgrade.md](4tb-upgrade.md) itemises what a larger drive buys back.
+
+**DeepSeek V4.1-Flash is no longer part of this decision.** Strata removed it; a launch answers *"Strata no longer offers DeepSeek models."* It previously appeared here as the one model that fits in memory at either tier but not on the drive, which is no longer a trade-off anyone has to weigh.
 
 The full catalogue, quality measurements and thinking-mode notes are in [strata-models.md](strata-models.md). The arithmetic behind the 15 GB server stack is in [server-architecture.md](server-architecture.md).

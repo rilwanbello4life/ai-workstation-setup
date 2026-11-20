@@ -9,7 +9,7 @@
 #   ./setup-all.sh 04 05      run only those steps
 #
 #   --tier <spec>   which Strata packs to install: a (default) .. abcdef, or
-#                   "all" for the whole 998 GB catalogue
+#                   "all" for the whole 1 006 GB catalogue
 #   --no-models     skip the ComfyUI, voice and GGUF downloads
 #
 # The unattended overnight run, which downloads everything and asks nothing:

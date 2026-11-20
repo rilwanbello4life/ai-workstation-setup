@@ -10,7 +10,7 @@ Download with [`download-models.ps1`](download-models.ps1) (Windows) or [`downlo
 
 Handled outside this manifest:
 
-- **Strata model packs** — fetched by Strata itself, never manually, and sized by RAM rather than by this manifest. On the factory 32 GB that is tier A: Flash-Next Coder (~68 GB), Qwen3.6-35B-A3B UD-Q4_K_XL (~23 GB) and Gyro-S (~59 GB), with Windows taking the first two only. After the phase 11 upgrade to 96 GB, `./07-strata.sh --tier all --install` fetches tiers A-G, about 998 GB - everything this machine can run.
+- **Strata model packs** — fetched by Strata itself, never manually, and sized by RAM rather than by this manifest. On the factory 32 GB that is tier A: Flash-Next Coder (~68 GB), Qwen3.6-35B-A3B UD-Q4_K_XL (~23 GB) and Gyro-S (~59 GB), with Windows taking the first two only. After the phase 11 upgrade to 96 GB, `./07-strata.sh --tier all --install` fetches tiers A-G, about 1 006 GB - every pack this machine can run. That is 14 of the 28 family/model combinations Strata offers; the rest will not fit on the drive, and `./07-strata.sh --catalogue` lists them with measured sizes.
 
   Packs are downloaded once and kept, so there is no harm in fetching the larger tiers before the DIMMs arrive — they simply sit on disk until the memory is there, and the installer warns rather than refuses. See [strata-models.md](../reference/strata-models.md) for the catalogue and what each memory tier unlocks.
 - **Fast everyday chat model** *(verified)* — `bartowski/Qwen2.5-14B-Instruct-GGUF` → `Qwen2.5-14B-Instruct-Q4_K_M.gguf`, roughly 9 GB, which sits entirely in 16 GB of VRAM and answers instantly. This is the `text` group, so `download-models.sh text` or `all` fetches it into `gguf/`.
@@ -114,7 +114,7 @@ Avoid XTTS-v2 and F5-TTS unless the project is non-commercial — both have lice
 
 Strata is the reason the two columns differ. It serves one model at a time, so installing several is purely a disk question — Ubuntu's 2 TB takes the full catalogue, while Windows takes Coder and Qwen3.6 only.
 
-On **Ubuntu** that lands against roughly 1 863 GiB of usable space on the 2 TB drive. The 998 GB Strata catalogue, these ComfyUI and voice models, the cluster's container images, the game-server worlds and the local backups come to about 1 456 GB, which leaves roughly 221 GB for a Steam library after a 186 GB free-space reserve. [partition-layout.md](../reference/partition-layout.md) has the full arithmetic.
+On **Ubuntu** that lands against roughly 1 863 GiB of usable space on the 2 TB drive. The 1 006 GB of Strata packs, these ComfyUI and voice models, the cluster's container images, the game-server worlds and the local backups come to about 1 464 GB, which leaves roughly 213 GB for a Steam library after a 186 GB free-space reserve. [partition-layout.md](../reference/partition-layout.md) has the full arithmetic.
 
 On **Windows** it is tighter: Windows and applications take ~80 GB of the 1 TB drive, leaving about 650 GB for games once the stack is in. If you want more room for games, skip the `video` group on Windows — that is 38 GB of the table above, and Wan 2.2 is the slowest thing on a 16 GB card anyway. Run it on Ubuntu instead.
 
@@ -129,7 +129,7 @@ This is not only about speed. `hf` contacts the hub for every entry even when
 the file is already cached, so re-running a finished manifest used to spend a
 long time on the network in order to do nothing. Strata is worse: the only way
 to ask it for a pack is `strata launch`, which loads the pack after fetching
-it, and on a 32 GB machine loading a 111 GB pack is what gets the desktop
+it, and on a 32 GB machine loading a 128 GB pack is what gets the desktop
 killed.
 
 It is a five-column TSV — `kind`, `id`, `status`, `when`, `note` — where `kind`

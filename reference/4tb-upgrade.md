@@ -9,8 +9,8 @@ Nothing in this kit was deleted when the build landed on a 2 TB drive instead of
 | | 4 TB plan | 2 TB build | Difference |
 |---|---:|---:|---:|
 | Ubuntu, desktop and applications | 50 GB | 50 GB | — |
-| **Strata, catalogue through tier E** | **677 GB** | **677 GB** | **—** |
-| **Strata, tier F — UD-IQ4_XS** | **111 GB** | **111 GB** | **—** |
+| **Strata, catalogue through tier E** | **673 GB** | **673 GB** | **—** |
+| **Strata, tier F — `unsloth/UD-IQ4_XS`** | **94 GB** | **94 GB** | **—** |
 | ComfyUI image models | 20 GB | 20 GB | — |
 | ComfyUI video models | 55 GB | 55 GB | — |
 | GGUF chat models | 30 GB | 30 GB | — |
@@ -20,18 +20,18 @@ Nothing in this kit was deleted when the build landed on a 2 TB drive instead of
 | Game-server worlds | 200 GB | 100 GB | **−100 GB** |
 | Local backups under `/srv/backups` | not budgeted | 100 GB | +100 GB |
 | Reserved free space | not budgeted (would be 372 GB) | 186 GB | — |
-| **Steam library** | **~2 007 GB available** | **~221 GB available** | **−1 786 GB** |
+| **Steam library** | **~2 011 GB available** | **~213 GB available** | **−1 798 GB** |
 
 Two of those rows are corrections rather than cuts. The original 4 TB budget never accounted for the local backup copies that phase 18 writes, nor for the Steam library that phase 19 installs — both were added to the kit after that table was written. They would have had to come out of the 4 TB plan too.
 
 ## The original 4 TB budget, preserved
 
-This is the table that was in [partition-layout.md](partition-layout.md) before the drive changed, kept verbatim so the reasoning is not lost:
+This is the table that was in [partition-layout.md](partition-layout.md) before the drive changed, kept so the reasoning is not lost. The structure is as it was; the Strata figure is the re-measured one, since quoting a number now known to be wrong would not preserve anything useful:
 
 | Item | Size |
 |---|---:|
 | Ubuntu, desktop and applications | ~50 GB |
-| Strata, full catalogue through tier E | ~677 GB |
+| Strata, full catalogue through tier E | ~673 GB |
 | ComfyUI image models | 20 GB |
 | ComfyUI video models | 55 GB |
 | GGUF chat models | 30 GB |
@@ -39,7 +39,7 @@ This is the table that was in [partition-layout.md](partition-layout.md) before 
 | k3s and container images | ~50 GB |
 | Postgres, n8n and app volumes | ~50 GB |
 | Game-server worlds | ~200 GB |
-| **Total** | **~1 135 GB** |
+| **Total** | **~1 131 GB** |
 
 > A 4 TB drive formats to roughly 3 725 GiB, so this leaves about **2.5 TB free** even with every Strata pack downloaded and a shelf of game servers. Storage stopped being a constraint the moment you chose 4 TB — RAM is the only thing you now have to ration.
 
@@ -49,26 +49,28 @@ Things you can add back individually on the 2 TB drive, cheapest first. Check `d
 
 | Item | Size | What it costs you |
 |---|---:|---|
-| Game-server worlds back to 200 GB | +100 GB | Steam library drops to ~442 GB |
+| Game-server worlds back to 200 GB | +100 GB | Steam library drops to ~113 GB at `--tier all`, or ~352 GB at `--tier abcdef` |
 | A second large game-server world (modded Minecraft, Satisfactory) | +50–100 GB | Same trade, smaller |
-| **DeepSeek V4.1-Flash** | **+257 GB** | Does not fit at all once tier G is installed — it overruns the drive by ~36 GB. See the caution below |
+| **`nvfp4/NVFP4-NVIDIA` or `NVFP4-QAD`** | **~128 GB each** | The whole remaining Steam allocation for one variant of a pack you already have. Only sensible on 4 TB |
+| **`unsloth` sizes above `UD-Q4_K_XL`** | **130 GB+ each** | Will not load in 96 GB either, so disk is the second problem rather than the first |
+| `swift/IQ3_XXS`, `swift/IQ3_S` | ~150 GB for the pair | Runs fine at 64 GB; duplicates Flash-Next sizes you already have at tiers D and E |
 | Raising the Windows Strata install past Coder + Qwen3.6 | +23–92 GB each | Comes off the Windows 1 TB, not this drive |
 
-### On DeepSeek V4.1-Flash
+### What is no longer on this list
 
-It is the one AI item that genuinely does not fit comfortably, and disk is only half the reason. It wants **257 GB** and measures around **5 tok/s** on a 16 GB card — slower than you can read. It was already outside the recommended set on the 4 TB plan for that reason, so this is not something the smaller drive took away from you.
+**DeepSeek V4.1-Flash has been removed from Strata.** Earlier revisions of this page carried it as the one AI item that genuinely needed the 4 TB upgrade — 257 GB for about 5 tok/s on a 16 GB card. A launch now answers *"Strata no longer offers DeepSeek models,"* so it is not a trade-off, a cherry-pick or an argument for a bigger drive any more. Nothing on this page reserves space for it.
 
-On the 2 TB drive with `--tier all` it no longer fits at any games budget: 998 GB of packs plus 257 GB of DeepSeek overruns the drive by roughly 36 GB even with an empty Steam library. It is the one model on this page that genuinely requires the 4 TB upgrade.
+What replaced it as the reason to want more disk is the other half of the Strata catalogue: 28 family/model combinations exist and `--tier all` installs 14. The rest are listed above, and `./07-strata.sh --catalogue` gives their measured sizes.
 
 ## What a 4 TB drive would actually buy
 
 Honest summary, since you may be weighing the upgrade:
 
 - **At 64 GB of RAM, nothing for AI capability.** Every model that fits in 64 GB already fits on 2 TB. The binding constraint is memory, not disk.
-- **At 96 GB, that changes.** All three 96 GB packs are now in the default install: UD-IQ4_XS as tier F and UD-Q4_K_XL plus NVFP4 as tier G, ~321 GB between them. The Steam library absorbed all of it, falling from 542 GB to about 221 GB. This is the first time disk has limited what this machine can *run* rather than what it can store, and on a 2 TB drive the games are what pay for it. See [ram-upgrade-decision.md](ram-upgrade-decision.md).
-- **About 1 576 GB more for games** — roughly eighteen more modern titles installed at once rather than deleting and re-downloading. This is still the largest practical difference, and on a 4 TB drive UD-Q4_K_XL and NVFP4 both become affordable without touching it.
-- **Room for DeepSeek without trade-offs**, if the 5 tok/s ever becomes acceptable to you.
-- **A larger SLC write cache**, because these drives scale cache with capacity. A 4 TB drive holding the same ~1.2 TB sits at 33% full rather than 61%, and sustained write speed holds up better as a result.
+- **At 96 GB, that changes.** All three 96 GB packs are in the default install: `unsloth/UD-IQ4_XS` as tier F and `unsloth/UD-Q4_K_XL` plus `nvfp4/NVFP4` as tier G, ~333 GB between them. The Steam library absorbed all of it, falling from 546 GB to about 213 GB. This is the first time disk has limited what this machine can *run* rather than what it can store, and on a 2 TB drive the games are what pay for it. See [ram-upgrade-decision.md](ram-upgrade-decision.md).
+- **About 1 798 GB more for games** — roughly twenty more modern titles installed at once rather than deleting and re-downloading. This is still the largest practical difference, and on a 4 TB drive `UD-Q4_K_XL` and `NVFP4` both become affordable without touching it.
+- **Room for the half of the catalogue `--tier all` leaves out** — the remaining Unsloth quants, the other two NVFP4 variants and the Swift sizes, which together are well over another terabyte. On 2 TB they are a trade against games; on 4 TB they are simply affordable.
+- **A larger SLC write cache**, because these drives scale cache with capacity. A 4 TB drive holding the same ~1.46 TB of stack sits at 39% full rather than 79%, and sustained write speed holds up better as a result.
 
 ## If you do upgrade
 

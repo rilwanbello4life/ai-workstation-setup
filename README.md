@@ -159,7 +159,7 @@ The downloads are the long part — the full catalogue is most of a terabyte —
 ./ubuntu/setup-all.sh -y --tier all      # everything, nothing to answer
 ```
 
-`-y` authenticates `sudo` once and refreshes the timestamp for the whole run, suppresses package configuration dialogs, and answers the questions *inside* each phase rather than only the wrapper's own. `--tier all` takes the whole 998 GB Strata catalogue - every pack this machine can run - instead of the 150 GB default. The model downloads run last, after every prompt has been dealt with.
+`-y` authenticates `sudo` once and refreshes the timestamp for the whole run, suppresses package configuration dialogs, and answers the questions *inside* each phase rather than only the wrapper's own. `--tier all` takes the whole 1 006 GB Strata catalogue - every pack this machine can run - instead of the 150 GB default. The model downloads run last, after every prompt has been dealt with.
 
 Two phases are left out of `-y` deliberately and must be asked for by name: `./setup-all.sh 08` signs into Tailscale in a browser, and `./setup-all.sh 09` installs several GB of 32-bit gaming libraries.
 
@@ -233,7 +233,7 @@ After a reboot, `./ops/up.sh` wraps all three: it waits for the cluster, undoes 
 
 Both systems get the full stack — text, image, video and voice — so this is preference rather than necessity:
 
-- **Ubuntu** is the better AI side, and the only server side. Native ext4, no desktop compositor to shed, `ai-console-mode` to reclaim VRAM, and room for the **entire Strata catalogue** plus the cluster and backups, with about 221 GB left for games. With phase 19 it is also a capable gaming machine — subject to one hard limit, covered in [reference/linux-gaming.md](reference/linux-gaming.md): kernel-level anti-cheat titles do not run on Linux at all, and no configuration changes that.
+- **Ubuntu** is the better AI side, and the only server side. Native ext4, no desktop compositor to shed, `ai-console-mode` to reclaim VRAM, and room for the **entire Strata catalogue** plus the cluster and backups, with about 213 GB left for games. With phase 19 it is also a capable gaming machine — subject to one hard limit, covered in [reference/linux-gaming.md](reference/linux-gaming.md): kernel-level anti-cheat titles do not run on Linux at all, and no configuration changes that.
 - **Windows** is full AI *plus* gaming. After Windows and the full stack there is roughly 690 GB left for games, which is four to six modern titles. That is the only thing the Windows side is short on, and a larger drive later fixes it.
 
 If space pinches before that upgrade, **drop the ComfyUI video models from Windows first** — 55 GB back, and Wan 2.2 is the slowest thing on a 16 GB card anyway. [windows/03-tune-windows.ps1](windows/03-tune-windows.ps1) reports the budget against your actual free space.

@@ -12,8 +12,8 @@ One box, two operating systems, on two separate drives. They share no filesystem
 |---|---|---|
 | For | Gaming, and AI when you are already in Windows | AI work, and the always-on server |
 | AI stack | Complete | Complete, plus the cluster |
-| Models | Coder + Qwen3.6, ~91 GB | The entire catalogue, ~998 GB |
-| Games | ~690 GB | ~221 GB, minus anti-cheat titles |
+| Models | Coder + Qwen3.6, ~91 GB | Every pack it can run, ~1 006 GB |
+| Games | ~690 GB | ~213 GB, minus anti-cheat titles |
 | Runs when you are away | No | Yes |
 
 Pick which one boots with **F8** at power-on.
@@ -188,7 +188,7 @@ VS Code is Electron, and Electron's GPU process and CUDA workloads coexist badly
 
 ### Keep an eye on the disk
 
-`--tier all` is 998 GB and includes everything this machine can run: tiers A-F at 788 GB plus tier G, which is UD-Q4_K_XL at 130 GB and NVFP4 at an estimated 80 GB. The only pack left out entirely is DeepSeek V4.1-Flash, at 257 GB for about 5 tok/s. Check the space before adding anything beyond this:
+`--tier all` is 1 006 GB and includes everything this machine can *run*: tiers A-F at 767 GB plus tier G, which is `unsloth/UD-Q4_K_XL` at 111 GB and `nvfp4/NVFP4` at 128 GB. It is not the whole catalogue — Strata offers 28 family/model combinations and this installs 14, because the drive cannot hold the rest. See `./07-strata.sh --catalogue`. Check the space before adding anything beyond this:
 
 ```bash
 df -h /
