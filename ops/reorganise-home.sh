@@ -233,6 +233,41 @@ relocate_venv() {
 }
 
 # ---------------------------------------------------------------------------
+# Remove every CMake build tree under the new apps root whose cache was
+# written for a different path.
+#
+# Checked rather than assumed: a tree that happens to be in the right place
+# already is left alone, so this does not force a rebuild on a second run of
+# --apply. CMAKE_HOME_DIRECTORY is the source directory and
+# CMAKE_CACHEFILE_DIR the build directory; either being stale is fatal to
+# the next configure.
+discard_cmake_caches() {
+    local cache dir src bld
+
+    [[ -d "$NEW_APPS" ]] || return 0
+
+    while IFS= read -r cache; do
+        dir="$(dirname "$cache")"
+        src="$(sed -n 's/^CMAKE_HOME_DIRECTORY:INTERNAL=//p' "$cache" | head -n1)"
+        bld="$(sed -n 's/^CMAKE_CACHEFILE_DIR:INTERNAL=//p' "$cache" | head -n1)"
+
+        if [[ "$bld" == "$dir" && -d "$src" ]]; then
+            continue
+        fi
+
+        rm -rf "$dir"
+        ok "    discarded stale CMake build tree: $(short "$dir")"
+        warn "    it will be rebuilt by its phase script, which takes a while."
+        REBUILD+=("$dir")
+    done < <(find "$NEW_APPS" -maxdepth 4 -name CMakeCache.txt -type f 2>/dev/null || true)
+
+    # find returning nothing is not a failure, but the loop above is the
+    # last thing in the function and a non-zero status here would end the
+    # run under set -e.
+    return 0
+}
+
+# ---------------------------------------------------------------------------
 # Keep the first copy and only the first copy.
 #
 # A second --apply would otherwise back up the already-rewritten file over
@@ -315,9 +350,20 @@ fix_references() {
     relocate_venv "$NEW_APPS/ComfyUI/.venv" "$old_apps" "$NEW_APPS"
     relocate_venv "$NEW_APPS/voice/.venv"   "$old_apps" "$NEW_APPS"
 
-    # llama.cpp is compiled C++ with no absolute paths in the binaries, but
-    # 04-llama-cpp.sh symlinks the server into ~/.local/bin and that symlink
-    # is absolute.
+    # CMake build trees are not relocatable. CMakeCache.txt records the
+    # absolute path of both the source and the build directory, and cmake
+    # refuses to configure when either has changed - so llama.cpp fails on
+    # the next ./04-llamacpp.sh with a message about the cache directory
+    # being different, which does not mention the move at all.
+    #
+    # The compiled binaries are fine; it is only the configuration that is
+    # tied to a path. There is nothing worth rescuing in a build tree, so it
+    # is discarded rather than rewritten. The cost is one rebuild, and it is
+    # better paid here, visibly, than discovered on a later phase run.
+    discard_cmake_caches
+
+    # llama.cpp's binaries contain no absolute paths, but 04-llamacpp.sh
+    # symlinks the server into ~/.local/bin and that symlink is absolute.
     f="$HOME/.local/bin/llama-server"
     if [[ -L "$f" ]]; then
         local tgt; tgt="$(readlink "$f")"
@@ -436,6 +482,29 @@ scan_stale() {
         warn "Most are caches or logs and do not matter. Anything that does"
         warn "can be fixed by re-running the phase that generated it."
     fi
+
+    # Called out separately because the generic advice above is wrong for
+    # these. A stale CMakeCache.txt is not a harmless leftover: it stops the
+    # next configure outright, and re-running the phase does not clear it
+    # unless the phase knows to. 04-llamacpp.sh does now; this exists so
+    # --check reports the problem on a tree this script never migrated.
+    local cache dir src bld stale=0
+    if [[ -d "$NEW_APPS" ]]; then
+        while IFS= read -r cache; do
+            dir="$(dirname "$cache")"
+            src="$(sed -n 's/^CMAKE_HOME_DIRECTORY:INTERNAL=//p' "$cache" | head -n1)"
+            bld="$(sed -n 's/^CMAKE_CACHEFILE_DIR:INTERNAL=//p' "$cache" | head -n1)"
+            [[ "$bld" == "$dir" && -d "$src" ]] && continue
+            (( stale == 0 )) && warn "Stale CMake build trees - these will not configure:"
+            printf '    %s  (cached as %s)\n' "$(short "$dir")" "${bld:-unknown}"
+            stale=$((stale + 1))
+        done < <(find "$NEW_APPS" -maxdepth 4 -name CMakeCache.txt -type f 2>/dev/null || true)
+    fi
+    if (( stale > 0 )); then
+        warn "Remove each directory above and re-run its phase script."
+    fi
+
+    return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -602,9 +671,12 @@ EOF
     section "Done"
 
     if (( ${#REBUILD[@]} )); then
-        warn "These virtualenvs need rebuilding:"
+        warn "These did not survive the move and have to be rebuilt:"
         printf '      %s\n' "${REBUILD[@]}"
-        warn "Re-run ubuntu/05-comfyui.sh and/or ubuntu/06-voice.sh."
+        warn "Re-run the phase that produced each one - 04-llamacpp.sh for a"
+        warn "build tree, 05-comfyui.sh or 06-voice.sh for a virtualenv."
+        warn "Nothing was lost: all three regenerate from source, and no"
+        warn "model files are involved."
         echo
     fi
 

@@ -105,6 +105,18 @@ Strata packs are reconciled from `strata models list`, because there is no direc
 
 The launchers run in the foreground, so `Ctrl+C` stops them. `voice/server.py` is a **copy** — editing the kit does not change the installed server until you re-run `ubuntu/06-voice.sh`.
 
+### Three things here do not survive being moved
+
+Everything under `ai/models` is just data and can be relocated freely. The application directory is not, and all three cases fail in ways that do not mention the move:
+
+| What | How it breaks | Fix |
+|---|---|---|
+| `ComfyUI/.venv`, `voice/.venv` | `bad interpreter: No such file or directory` — a venv writes its absolute path into `pyvenv.cfg`, the activate scripts and every shebang in `bin/` | `ops/reorganise-home.sh` rewrites and then verifies them; a venv that fails is reported for rebuild |
+| `llama.cpp/build` | `The current CMakeCache.txt directory ... is different than the directory ... where CMakeCache.txt was created` | Not repairable and not worth repairing — the tree is discarded and rebuilt. `04-llamacpp.sh` now detects a stale cache and clears it itself |
+| `~/.local/bin/llama-server` | A dangling absolute symlink | Repointed during the migration |
+
+The binaries themselves contain no absolute paths; it is only CMake's *configuration* that is tied to a location. That distinction is why the build tree can be thrown away without losing anything but compile time.
+
 ## Platform state — the part worth backing up
 
 ```

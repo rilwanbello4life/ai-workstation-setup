@@ -47,6 +47,31 @@ ok "Source at $REPO"
 
 section "Build"
 
+# A CMake build tree is not relocatable. CMakeCache.txt records the absolute
+# path of both the source and the build directory, so if either has moved -
+# which ops/reorganise-home.sh does when it puts ~/apps under ~/ai/apps -
+# cmake refuses to configure and says so in terms that sound like a mistake
+# you made rather than a stale artefact:
+#
+#   The current CMakeCache.txt directory ... is different than the directory
+#   ... where CMakeCache.txt was created.
+#
+# The build tree is wholly regenerable, so the fix is to discard it rather
+# than try to rewrite the paths inside it. That costs a full rebuild, which
+# is the honest price of having moved the directory; nothing else is lost.
+if [[ -f "$REPO/build/CMakeCache.txt" ]]; then
+    cached_src="$(sed -n 's/^CMAKE_HOME_DIRECTORY:INTERNAL=//p' \
+                  "$REPO/build/CMakeCache.txt" | head -n1)"
+    cached_bld="$(sed -n 's/^CMAKE_CACHEFILE_DIR:INTERNAL=//p' \
+                  "$REPO/build/CMakeCache.txt" | head -n1)"
+    if [[ "$cached_src" != "$REPO" || "$cached_bld" != "$REPO/build" ]]; then
+        warn "The existing build tree was configured for a different path:"
+        warn "  source was ${cached_src:-unknown}, now $REPO"
+        warn "Discarding it and reconfiguring. This forces a full rebuild."
+        rm -rf "$REPO/build"
+    fi
+fi
+
 # CMAKE_CUDA_ARCHITECTURES=120 targets Blackwell only, which keeps compile time
 # down. Add more architectures (e.g. "86;120") only if you move the binaries to
 # a different machine.
