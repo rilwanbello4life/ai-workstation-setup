@@ -289,6 +289,30 @@ ai-status                      # memory, VRAM, model ports, cluster state
 kubectl get pods -A            # what is actually running
 ```
 
+**LiteLLM restarts forever on first install; the logs always stop at the same line.**
+The giveaway is that `kubectl logs deployment/litellm` and `kubectl logs deployment/litellm --previous` are byte-identical and end at the same instant, somewhere after:
+
+```
+Found 233 migrations at /app/.venv/.../litellm_proxy_extras
+Waiting for the Prisma migration lock (up to 600.0s)
+Acquired the Prisma migration lock
+```
+
+This is not a database problem — reaching the migration lock proves Postgres is up, reachable and authenticating. LiteLLM applies its full schema before it binds port 4000, and it allows itself 600 seconds. Port 4000 is closed for that whole period, so every HTTP probe fails.
+
+The trap is that the failure sustains itself. A liveness probe that fires during the migration kills the container part-way; the replacement starts all 233 migrations again from the beginning; it is killed at the same point. It can never finish, because the restart budget is smaller than the work. Raising `initialDelaySeconds` is the wrong fix: no value large enough to cover a first-boot migration is a sensible steady-state liveness setting, and you would be choosing between killing a healthy slow start and ignoring a genuinely wedged process for ten minutes.
+
+`startupProbe` exists for this. Liveness does not begin counting until it has succeeded once, so the two cases get separate budgets. Both manifests carry `periodSeconds: 10` with `failureThreshold: 90` — 900 seconds, over LiteLLM's own ceiling. Later boots have nothing to migrate and pass in under a minute, so it costs nothing in the normal case.
+
+If it was interrupted often enough to leave a half-applied migration, Prisma records it and then refuses to move:
+
+```bash
+kubectl -n platform exec deploy/postgres -- psql -U postgres -d litellm \
+  -c "select migration_name, finished_at from _prisma_migrations where finished_at is null;"
+```
+
+Any row there must be cleared before it will progress. Note that `09-gpu-queue.sh` puts the job and profile tables in this same `litellm` database, so dropping the database to start clean means re-running that script afterwards.
+
 **A pod stays `Running`, never becomes ready, and its logs are completely empty.**
 Not slow, not erroring — zero bytes. `kubectl logs` returns nothing and `/var/log/pods/<namespace>_<pod>_*/<container>/*.log` is an empty file. Every probe fails, the liveness probe eventually restarts it, and the cycle repeats without a single line of output.
 

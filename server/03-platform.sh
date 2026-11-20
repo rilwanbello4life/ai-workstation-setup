@@ -108,7 +108,10 @@ done
 section "LiteLLM gateway"
 
 apply_manifest "$K8S_DIR/11-litellm.yaml"
-wait_for_deploy litellm "$K8S_NS" 240 || \
+# 900s, not the 240s used for everything else: first boot applies 233 Prisma
+# migrations before the port opens. Later runs reach ready in well under a
+# minute, so this ceiling costs nothing once the database is current.
+wait_for_deploy litellm "$K8S_NS" 900 || \
     warn "LiteLLM is not ready. It may still be running database migrations."
 
 # ---------------------------------------------------------------------------

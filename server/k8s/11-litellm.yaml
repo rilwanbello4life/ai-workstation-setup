@@ -76,17 +76,42 @@ spec:
           volumeMounts:
             - name: config
               mountPath: /config
+          # On first boot LiteLLM applies 233 Prisma migrations before it
+          # binds port 4000, and it allows itself 600s to do it. Port 4000
+          # is closed for that whole time.
+          #
+          # Without a startupProbe the liveness probe starts its own clock
+          # immediately, and no initialDelaySeconds large enough to cover a
+          # migration is a sane steady-state liveness setting. Worse, the
+          # failure is self-perpetuating: the probe kills the container
+          # part-way through, the replacement starts the 233 migrations
+          # again from the beginning, and it never converges because the
+          # restart budget is smaller than the work.
+          #
+          # A startupProbe is the mechanism for exactly this. Liveness does
+          # not begin until this has succeeded once, so slow start and
+          # "wedged after running for a week" get separate budgets instead
+          # of being forced to share one number.
+          #
+          # 10s x 90 = 900s, comfortably over LiteLLM's own 600s ceiling,
+          # because being killed mid-migration is far more expensive than
+          # noticing a genuine failure five minutes late. Subsequent boots
+          # have nothing to migrate and pass in well under a minute.
+          startupProbe:
+            httpGet:
+              path: /health/liveliness
+              port: 4000
+            periodSeconds: 10
+            failureThreshold: 90
           readinessProbe:
             httpGet:
               path: /health/liveliness
               port: 4000
-            initialDelaySeconds: 20
             periodSeconds: 10
           livenessProbe:
             httpGet:
               path: /health/liveliness
               port: 4000
-            initialDelaySeconds: 90
             periodSeconds: 30
       volumes:
         - name: config

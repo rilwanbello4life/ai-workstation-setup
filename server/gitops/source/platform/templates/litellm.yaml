@@ -71,17 +71,28 @@ spec:
           volumeMounts:
             - name: config
               mountPath: /config
+          # Must stay in step with server/k8s/11-litellm.yaml, which carries
+          # the full reasoning. In short: first boot applies 233 Prisma
+          # migrations before port 4000 opens, LiteLLM allows itself 600s
+          # for it, and a liveness probe that kills the container part-way
+          # restarts the migrations from the beginning, so it never
+          # converges. The startupProbe gates liveness until the first
+          # success, giving slow start and genuine wedging separate budgets.
+          startupProbe:
+            httpGet:
+              path: /health/liveliness
+              port: 4000
+            periodSeconds: 10
+            failureThreshold: 90
           readinessProbe:
             httpGet:
               path: /health/liveliness
               port: 4000
-            initialDelaySeconds: 20
             periodSeconds: 10
           livenessProbe:
             httpGet:
               path: /health/liveliness
               port: 4000
-            initialDelaySeconds: 90
             periodSeconds: 30
       volumes:
         - name: config
