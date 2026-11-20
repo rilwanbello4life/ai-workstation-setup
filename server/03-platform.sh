@@ -71,7 +71,11 @@ ok "Secrets applied to the cluster."
 section "Postgres"
 
 apply_manifest "$K8S_DIR/10-postgres.yaml"
-wait_for_deploy postgres "$K8S_NS" 180 || die "Postgres did not start."
+# 360s, not 180s. The pod's own startupProbe allows 300s for a first boot
+# that has to run initdb, so a 180s wait here reports a failure while the
+# cluster is still legitimately starting - and the scripts that follow then
+# refuse to run against a database that was about to be fine.
+wait_for_deploy postgres "$K8S_NS" 360 || die "Postgres did not start."
 
 # Three logical databases in one server. LiteLLM and n8n each get their own
 # role; the agent prompt store lives in the litellm database alongside its
