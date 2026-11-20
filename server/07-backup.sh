@@ -198,14 +198,22 @@ fi
 # is the thing that saves you when the database restore is the broken part.
 if kubectl -n "$K8S_NS" get deploy n8n >/dev/null 2>&1 &&
    [[ "$(kubectl -n "$K8S_NS" get deploy n8n -o jsonpath='{.status.readyReplicas}')" == "1" ]]; then
-    if kubectl -n "$K8S_NS" exec deploy/n8n -- \
-         n8n export:workflow --all --pretty --output=/tmp/wf.json >/dev/null 2>&1; then
+    # Keep the output. Discarding it turns every possible cause - no
+    # workflows, no database, a broken exec - into the same unactionable
+    # line, which is exactly what happened the first time this ran.
+    if wf_out="$(kubectl -n "$K8S_NS" exec deploy/n8n -- \
+                   n8n export:workflow --all --pretty --output=/tmp/wf.json 2>&1)"; then
         kubectl -n "$K8S_NS" exec deploy/n8n -- cat /tmp/wf.json \
             > "$BACKUP_DIR/workflows/workflows-$STAMP.json" 2>/dev/null
         kubectl -n "$K8S_NS" exec deploy/n8n -- rm -f /tmp/wf.json >/dev/null 2>&1
         log "Workflows exported."
+    elif grep -qiE 'no workflows found|found no workflows' <<<"$wf_out"; then
+        # An empty n8n is the normal state until someone creates the owner
+        # account and imports something. It is not a backup failure, and
+        # reporting it as one trains you to ignore the summary line.
+        log "n8n has no workflows yet. Nothing to export."
     else
-        oops "n8n workflow export failed."
+        oops "n8n workflow export failed: $(tail -n 2 <<<"$wf_out" | tr '\n' ' ')"
     fi
 else
     log "n8n is not running. Skipping the workflow export."

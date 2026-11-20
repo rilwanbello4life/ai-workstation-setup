@@ -550,22 +550,57 @@ case "${1:-status}" in
     tag="$(date '+%Y%m%d-%H%M%S')"
     ref="localhost/$name:$tag"
 
+    # k3s bundles containerd but no way to build with it - 'ctr' imports
+    # images, it does not build them. So a builder has to come from
+    # somewhere, and a fresh server has none.
+    #
+    # podman is the one to install: no daemon, no background service, and
+    # nothing to run when we are not building. Docker would add a root
+    # daemon permanently for the sake of an occasional build.
     builder=""
     for b in nerdctl podman docker; do command -v "$b" >/dev/null && { builder="$b"; break; }; done
-    [[ -n "$builder" ]] || { err "No container builder found (nerdctl, podman or docker)."; exit 1; }
+
+    if [[ -z "$builder" ]]; then
+        warn "No container builder found, and k3s cannot build images itself."
+        info "podman is the lightest fit here: no daemon, nothing left running."
+        if confirm "Install podman now?"; then
+            sudo apt-get update -qq
+            sudo apt-get install -y podman >/dev/null || { err "podman install failed"; exit 1; }
+            builder=podman
+            ok "podman installed."
+        else
+            err "Cannot build without one. Re-run after installing nerdctl, podman or docker."
+            exit 1
+        fi
+    fi
+
+    # Ubuntu 24.04 sets kernel.apparmor_restrict_unprivileged_userns=1, which
+    # stops rootless podman creating the user namespace it needs. Root podman
+    # is unaffected, and we already need sudo below for the containerd import,
+    # so fall back rather than asking the user to loosen a kernel hardening
+    # setting for one build.
+    SUDO_B=""
+    if [[ "$builder" == podman ]] && ! podman info >/dev/null 2>&1; then
+        info "Rootless podman is unavailable here, so building as root."
+        info "Ubuntu 24.04 restricts unprivileged user namespaces; see"
+        info "reference/troubleshooting.md."
+        SUDO_B="sudo"
+    fi
 
     sec "Build"
-    "$builder" build -t "$ref" "$ctx" || { err "build failed"; exit 1; }
+    $SUDO_B "$builder" build -t "$ref" "$ctx" || { err "build failed"; exit 1; }
     ok "built $ref"
 
     # No registry on this machine, so the image is handed to k3s's containerd
     # directly. This is why the Deployment sets imagePullPolicy: Never.
     sec "Import into k3s"
     tmp="$(mktemp -d)"
-    "$builder" save -o "$tmp/img.tar" "$ref" || { err "save failed"; rm -rf "$tmp"; exit 1; }
+    $SUDO_B "$builder" save -o "$tmp/img.tar" "$ref" || {
+      err "save failed"; sudo rm -rf "$tmp"; exit 1; }
     sudo k3s ctr images import "$tmp/img.tar" >/dev/null || {
-      err "import failed"; rm -rf "$tmp"; exit 1; }
-    rm -rf "$tmp"
+      err "import failed"; sudo rm -rf "$tmp"; exit 1; }
+    # sudo, because a root build leaves a root-owned tarball behind.
+    sudo rm -rf "$tmp"
     ok "imported into containerd"
 
     sed -i "s|^\( *tag:\).*|\1 \"$tag\"|" "$DIR/source/$name/values.yaml"
