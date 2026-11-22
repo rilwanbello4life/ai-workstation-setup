@@ -579,8 +579,10 @@ Sysbox is installed but its daemons are not running. The two are genuinely separ
 ```sh
 multipass exec n8n-sandbox -- sudo systemctl enable --now sysbox
 multipass exec n8n-sandbox -- sudo systemctl restart docker
-multipass exec n8n-sandbox -- test -S /run/sysbox/sysfs.sock && echo ok
+multipass exec n8n-sandbox -- sudo test -S /run/sysbox/sysfs.sock && echo ok
 ```
+
+`/run/sysbox` is mode 700, so that last check must be run under `sudo`. Without it an unprivileged `test` cannot tell a socket that is absent from one it is not allowed to look at, and reports both as missing. The authoritative answer is in the log: `journalctl -u sysbox-fs` ends with `Listening on /run/sysbox/sysfs.sock` and `Ready ...` when all is well.
 
 `./10-sandbox.sh --apply` checks this on every run now, rather than only after installing, and waits for the socket rather than trusting the unit's state.
 

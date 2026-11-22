@@ -366,11 +366,14 @@ else
 
     # The unit can report active while sysbox-fs is still laying down its
     # mountpoint, and the socket is what the runtime actually dials.
+    # Under sudo because /run/sysbox is mode 700: an unprivileged test
+    # cannot distinguish a socket that is missing from one it may not look
+    # at, and both come back as plain false.
     for _ in $(seq 1 15); do
-        in_vm 'test -S /run/sysbox/sysfs.sock' 2>/dev/null && break
+        in_vm 'sudo test -S /run/sysbox/sysfs.sock' 2>/dev/null && break
         sleep 2
     done
-    in_vm 'test -S /run/sysbox/sysfs.sock' 2>/dev/null \
+    in_vm 'sudo test -S /run/sysbox/sysfs.sock' 2>/dev/null \
         || die "sysbox started but /run/sysbox/sysfs.sock never appeared. '--shell' to investigate."
     ok "Sysbox running."
 fi
