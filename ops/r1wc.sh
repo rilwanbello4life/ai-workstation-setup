@@ -448,6 +448,19 @@ n8n - the workflow editor. This is where the agent loop is wired together.
   the owner account, so claim it before anything else can. It is bound to
   loopback and Tailscale, so that is your own devices, not the internet.
 
+  Inside n8n, do NOT use 127.0.0.1. n8n runs in the cluster, so loopback
+  there means the n8n container itself and you get ECONNREFUSED. That
+  applies to the AI Assistant settings and to any HTTP Request node
+  pointing at something on this machine:
+
+      from your desktop     http://127.0.0.1:4000/v1
+      from inside n8n       http://litellm.platform.svc.cluster.local:4000/v1
+
+  For the built-in AI Assistant: an OpenAI-compatible provider, the
+  cluster URL above, model 'strata', and 'sk-' followed by
+  /srv/platform/secrets/litellm-master-key. It only answers while a pack
+  is actually loaded - 'strata' passes through to whatever is on 8080.
+
   Starter workflows were written to /srv/platform/n8n-workflows. Import
   them with Workflows > Import from file. Read them before activating -
   they are starting points, not products.
