@@ -316,8 +316,14 @@ section "Docker and Sysbox inside the guest"
 
 # Everything below runs in the guest. It is idempotent: Docker's convenience
 # script and the Sysbox setup script both detect an existing install.
+#
+# Note what this condition does NOT prove. Docker lists sysbox-runc as a
+# runtime because the package wrote a daemon.json entry; that says the
+# runtime is registered, not that the daemons behind it are up. Installed
+# and running are separate questions here, and they are asked separately -
+# the install is skipped when it is done, the start is checked every time.
 if multipass exec "$VM_NAME" -- docker info --format '{{json .Runtimes}}' 2>/dev/null | grep -q sysbox-runc; then
-    ok "Docker and sysbox-runc already present."
+    ok "Docker and sysbox-runc already registered."
 else
     info "Installing Docker in the guest."
     multipass exec "$VM_NAME" -- bash -c '
@@ -340,18 +346,33 @@ else
         chmod +x setup-sysbox.sh
         sudo ./setup-sysbox.sh" || true
 
+    ok "Sysbox installed."
+fi
+
+# Checked on every run, not only after an install. The symptom otherwise is
+# a container create failing deep inside the OCI runtime with "dial unix
+# /run/sysbox/sysfs.sock: no such file or directory" - which names a socket
+# rather than a service, and arrives at the end of a long compose pull.
+if in_vm 'systemctl is-active --quiet sysbox-fs && systemctl is-active --quiet sysbox-mgr' 2>/dev/null; then
+    ok "sysbox-fs and sysbox-mgr are running."
+else
     info "Starting sysbox and reloading Docker."
-    multipass exec "$VM_NAME" -- bash -c '
+    in_vm '
         set -e
         sudo systemctl daemon-reload
         sudo systemctl enable --now sysbox
         sudo systemctl restart docker' \
-        || die "Could not start sysbox. 'multipass shell $VM_NAME' then 'systemctl status sysbox'."
+        || die "Could not start sysbox. '--shell' then 'systemctl status sysbox-fs'."
 
-    multipass exec "$VM_NAME" -- docker info --format '{{json .Runtimes}}' 2>/dev/null |
-        grep -q sysbox-runc \
-        || die "sysbox-runc is not a Docker runtime in the guest. 'multipass shell $VM_NAME' to investigate."
-    ok "Sysbox installed and running."
+    # The unit can report active while sysbox-fs is still laying down its
+    # mountpoint, and the socket is what the runtime actually dials.
+    for _ in $(seq 1 15); do
+        in_vm 'test -S /run/sysbox/sysfs.sock' 2>/dev/null && break
+        sleep 2
+    done
+    in_vm 'test -S /run/sysbox/sysfs.sock' 2>/dev/null \
+        || die "sysbox started but /run/sysbox/sysfs.sock never appeared. '--shell' to investigate."
+    ok "Sysbox running."
 fi
 
 # ---------------------------------------------------------------------------

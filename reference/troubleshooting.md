@@ -573,6 +573,17 @@ multipass exec n8n-sandbox -- docker info --format '{{json .Runtimes}}'
 
 That last line is the real test; it must mention `sysbox-runc`. `./10-sandbox.sh --apply` now does all three itself.
 
+**The runner container fails with `dial unix /run/sysbox/sysfs.sock: no such file or directory`.**
+Sysbox is installed but its daemons are not running. The two are genuinely separate states, and the confusing part is that `docker info` lists `sysbox-runc` as a runtime either way — the package wrote that into `daemon.json`, which says the runtime is registered, not that anything is behind it. The API container starts normally, because only the runner uses `runtime: sysbox-runc`.
+
+```sh
+multipass exec n8n-sandbox -- sudo systemctl enable --now sysbox
+multipass exec n8n-sandbox -- sudo systemctl restart docker
+multipass exec n8n-sandbox -- test -S /run/sysbox/sysfs.sock && echo ok
+```
+
+`./10-sandbox.sh --apply` checks this on every run now, rather than only after installing, and waits for the socket rather than trusting the unit's state.
+
 **n8n cannot reach the sandbox although the VM is running.**
 `./10-sandbox.sh --status` compares the VM's current address against the one in the EndpointSlice and says so if they differ. A guest that was rebuilt, or simply rebooted, can come back on a new address, and nothing in the cluster notices: the Service still resolves and the EndpointSlice still looks valid. `--apply` rewrites it.
 
