@@ -137,7 +137,11 @@ The binaries themselves contain no absolute paths; it is only CMake's *configura
 │       ├── litellm-salt-key
 │       ├── openwebui-secret-key
 │       ├── minecraft-rcon-password
-│       └── valheim-password
+│       ├── valheim-password
+│       ├── argocd-admin-password
+│       ├── sandbox-api-key                    what n8n sends to the code sandbox
+│       ├── sandbox-registration-token
+│       └── sandbox-runner-api-key
 ├── games/                                     game-server worlds
 ├── backups/
 │   ├── postgres/                              pg-<timestamp>.sql.zst
@@ -181,6 +185,10 @@ Not on PATH, run from the kit by path — these are the day-to-day ones, documen
 | `ops/up.sh` | after a boot: wait for k3s, undo a leftover pause, report what is not running |
 | `ops/switch.sh` | swap the one heavy workload the 16 GB card can hold |
 | `ops/down.sh` | snapshot Postgres and stop the cluster cleanly before a shutdown |
+| `ops/r1wc.sh` | the console: every service in one menu, with its own documentation |
+| `server/10-sandbox.sh` | build, inspect, enter or remove the code sandbox VM |
+
+The code sandbox is the one component that lives outside both the host and the cluster. The guest is multipass's, under `/var/snap/multipass/common/data/`, and inside it the service is `/home/ubuntu/sandbox` — a `compose.yaml` and a `.env` at mode 600. Nothing in there is worth backing up: the credentials are regenerable and the guest is disposable by design. `server/k8s/14-sandbox-bridge.yaml` is generated, holds that VM's address, and is gitignored for being true of exactly one machine.
 
 ## systemd units
 

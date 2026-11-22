@@ -271,6 +271,24 @@ Note that n8n distinguishes **test** and **production** webhook URLs. The path a
 
 To call a model from a new workflow of your own, use an **HTTP Request** node against `http://litellm.platform.svc.cluster.local:4000/v1/chat/completions` — the in-cluster address, not `127.0.0.1`, because the node runs inside a pod.
 
+### The Assistant and its sandbox
+
+n8n's built-in Assistant writes and runs code, and it will not run any until you give it a sandbox. The sandbox is a service you host yourself — there is no URL to look up and no key to be issued — so `server/10-sandbox.sh --apply` builds one: an Ubuntu 24.04 VM named `n8n-sandbox` running the upstream service with Sysbox runners inside it.
+
+It is a VM rather than a pod because this is the only part of the stack that exists to run code a model wrote rather than code you chose. The boundaries nest — Sysbox inside the guest, the hypervisor around it — so code that breaks out of the sandbox lands in a disposable image holding nothing, instead of on the machine with the secrets, the models and the GPU.
+
+| | |
+|---|---|
+| Build or repair | `server/10-sandbox.sh --apply` — safe to re-run |
+| What is running | `server/10-sandbox.sh --status` |
+| A shell inside it | `server/10-sandbox.sh --shell` |
+| Container logs | `server/10-sandbox.sh --logs` |
+| Give back 6 GB | `multipass stop n8n-sandbox` |
+
+n8n is pointed at it through environment variables in the manifest rather than the settings page, so the Assistant normally finds it with nothing typed. If it does ask, the Service URL is `http://sandbox.platform.svc.cluster.local:8080` and the key is in `/srv/platform/secrets/sandbox-api-key`. Use the cluster name rather than the VM's address: n8n runs inside the cluster, and the guest's address changes when it is rebuilt.
+
+**It does not start at boot.** At 32 GB you cannot run the sandbox, the cluster and a Strata pack together, so starting it stays a decision. `r1wc` has it as an ordinary row with start and stop.
+
 ### The thing to back up
 
 `/srv/platform/secrets/n8n-encryption-key` decrypts every credential n8n stores. Lose it and they are all permanently unreadable, with no recovery path — a database restore will not save you. It belongs somewhere off this machine. See [backups.md](backups.md).

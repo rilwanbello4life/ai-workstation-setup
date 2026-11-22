@@ -554,6 +554,37 @@ There should only ever be one replica — admission counters are in memory, so a
 
 Deeper material: [gpu-queue.md](gpu-queue.md).
 
+## Code sandbox
+
+**`multipass launch` fails with `failed to open file ... multipass_root_cert.pem`.**
+The snap finished installing but its daemon had not generated its certificates yet. Wait a few seconds and re-run `./10-sandbox.sh --apply`. Re-running is always safe.
+
+**The VM's address comes back as `zone1` or another nonsense value.**
+Something is reading `multipass info --format csv` by column position. multipass 1.17 added a `Zone` column ahead of `IPv4`, so every positional field after it shifted by one. The kit reads by header name now; if you have a script of your own doing this, fix it the same way. The failure is quiet and delayed — the address gets written into the cluster bridge, and what you see later is n8n timing out.
+
+**Sysbox installs, then `ERROR: sysbox service is not running`.**
+The package is fine. Look further up for `Could not execute systemctl: at /usr/bin/deb-systemd-invoke line 148` — dpkg's post-install script cannot reach systemd over a non-interactive `multipass exec`, so the units are written and enabled but never started, and the installer's own closing check then fails. Start them by hand:
+
+```sh
+multipass exec n8n-sandbox -- sudo systemctl enable --now sysbox
+multipass exec n8n-sandbox -- sudo systemctl restart docker
+multipass exec n8n-sandbox -- docker info --format '{{json .Runtimes}}'
+```
+
+That last line is the real test; it must mention `sysbox-runc`. `./10-sandbox.sh --apply` now does all three itself.
+
+**n8n cannot reach the sandbox although the VM is running.**
+`./10-sandbox.sh --status` compares the VM's current address against the one in the EndpointSlice and says so if they differ. A guest that was rebuilt, or simply rebooted, can come back on a new address, and nothing in the cluster notices: the Service still resolves and the EndpointSlice still looks valid. `--apply` rewrites it.
+
+**Did a failed run leave a second VM behind?**
+No. The VM is addressed by name, so a re-run starts the existing one instead of launching another, and the containers are one named compose project. `multipass list` is the direct check, and `--status` warns if it sees any other VM with `sandbox` in its name.
+
+**The VM is up but the API does not answer.**
+`./10-sandbox.sh --logs`. Usually an image still pulling. `--restart` recreates the containers without rebuilding the guest.
+
+**Reclaiming the memory.**
+`multipass stop n8n-sandbox` gives back 6 GB. Nothing else breaks — n8n starts without the sandbox, and only the Assistant's code execution stops working.
+
 ## GitOps and Argo CD
 
 **An Application is `OutOfSync` and stays that way.**

@@ -1,16 +1,16 @@
-# Roadmap — phases 22 to 26
+# Roadmap — phases 23 to 27
 
-Phases 1 to 21 are built and documented. This file specifies the five that are not, in enough detail that building them is implementation rather than design: the files to create, the ports to bind, the decisions already taken and the reasons behind them.
+Phases 1 to 22 are built and documented — 22 is the code sandbox, [server/10-sandbox.sh](../server/10-sandbox.sh), which came out of n8n's Assistant refusing to run code without one. This file specifies the five that are not, in enough detail that building them is implementation rather than design: the files to create, the ports to bind, the decisions already taken and the reasons behind them.
 
 The first four come from one request — *"an orchestration of AI for anything I want to do, an MCP server connecting my Gmail and Drive, a model that writes workflows for me, something I can dictate to, and a dashboard over all of it"* — split into the smallest pieces that each stand alone and each leave the stack working.
 
 | Phase | What | New files | Port |
 |---|---|---|---|
-| 22 | MCP gateway — Gmail, Drive, Calendar and the rest as agent tools | `server/10-mcp.sh`, `server/k8s/14-mcp.yaml` | 4200 |
-| 23 | Dictation front door — speak at the system, it decides what to do | `server/11-dictation.sh`, `server/dictation/router.py` | 4300 |
-| 24 | Workflow author — an agent that writes n8n workflows | extends `server/04-agents.sh` | — |
-| 25 | Dashboard — one page showing everything above | `server/12-dashboard.sh`, `server/k8s/15-dashboard.yaml` | 4400 |
-| 26 | Medic — an agent that diagnoses this machine, read-only | `server/13-medic.sh` | — |
+| 23 | MCP gateway — Gmail, Drive, Calendar and the rest as agent tools | `server/11-mcp.sh`, `server/k8s/15-mcp.yaml` | 4200 |
+| 24 | Dictation front door — speak at the system, it decides what to do | `server/12-dictation.sh`, `server/dictation/router.py` | 4300 |
+| 25 | Workflow author — an agent that writes n8n workflows | extends `server/04-agents.sh` | — |
+| 26 | Dashboard — one page showing everything above | `server/13-dashboard.sh`, `server/k8s/16-dashboard.yaml` | 4400 |
+| 27 | Medic — an agent that diagnoses this machine, read-only | `server/14-medic.sh` | — |
 
 Ports 4200, 4300 and 4400 are reserved in [ports.md](ports.md) so nothing else takes them in the meantime. They continue the 4xxx platform-service block that LiteLLM (4000) and the GPU queue (4100) started.
 
@@ -27,9 +27,9 @@ Ports 4200, 4300 and 4400 are reserved in [ports.md](ports.md) so nothing else t
 
 The key reaches the pod the same way the others do — `secret_file` writes it to `/srv/platform/secrets`, `03-platform.sh` folds it into the `litellm-credentials` secret, and the deployment reads it through a `secretKeyRef`. Everything downstream, including the roles in `agent_roles`, refers to models by alias, so pointing the `brain` role at a hosted model is an `UPDATE` on one row rather than a code change. That is the whole point of putting a gateway in front: **local and cloud differ by one line of configuration, not by an integration.**
 
-**"Kubernetes-style orchestration of models" is already answered, and the answer is no.** [agent-orchestration.md](agent-orchestration.md) opens with it: Kubernetes schedules pods, and one GPU with 16 GB of VRAM can hold one serious model, so there is nothing to schedule. Roles are prompts over a shared resident pack, not pods. Read that document before building phases 22 to 25 — all four assume its model, and phase 24 is a direct extension of its "automated automations" section.
+**"Kubernetes-style orchestration of models" is already answered, and the answer is no.** [agent-orchestration.md](agent-orchestration.md) opens with it: Kubernetes schedules pods, and one GPU with 16 GB of VRAM can hold one serious model, so there is nothing to schedule. Roles are prompts over a shared resident pack, not pods. Read that document before building phases 23 to 26 — all four assume its model, and phase 25 is a direct extension of its "automated automations" section.
 
-## Phase 22 — the MCP gateway
+## Phase 23 — the MCP gateway
 
 **Goal.** Give the agent layer read access to Gmail, Drive, Calendar, Docs, Sheets and Tasks, with write access added deliberately and one scope at a time.
 
@@ -47,7 +47,7 @@ Run both in one pod in the `platform` namespace, mcpo as the entrypoint and the 
 
 **Done when** n8n can list the last ten unread subject lines through an HTTP Request node pointed at 4200, and nothing on 4200 is reachable off loopback.
 
-## Phase 23 — the dictation front door
+## Phase 24 — the dictation front door
 
 **Goal.** One place to speak at. It transcribes, works out what you meant, and dispatches — rather than being a transcription box you then copy out of.
 
@@ -62,12 +62,12 @@ Run both in one pod in the `platform` namespace, mcpo as the entrypoint and the 
 
 - **A fixed enum, not free-form tool choice.** A small set of actions the router knows how to perform makes a misroute a visible wrong answer instead of an unpredictable one.
 - **Low confidence asks rather than guesses.** Below the threshold the router replies with a clarifying question. Dictation is lossy — homophones, half-sentences, background noise — and a system that acts confidently on a bad transcript is worse than one that asks.
-- **Anything outbound or destructive confirms first**, in the same turn, by voice. This is the second line of defence behind phase 22's scope split.
+- **Anything outbound or destructive confirms first**, in the same turn, by voice. This is the second line of defence behind phase 23's scope split.
 - **Every dictation is logged** to a `dictations` table — audio duration, transcript, chosen action, confidence, outcome — because the only way to improve the classifier prompt is to read the ones it got wrong. Same reasoning as `agent_runs`, same place to look.
 
 **Done when** you can say "remind me to renew the domain on Friday" into `curl` and find the note in Postgres, and say something deliberately ambiguous and be asked what you meant.
 
-## Phase 24 — the workflow author
+## Phase 25 — the workflow author
 
 **Goal.** Describe an automation in a sentence and get an n8n workflow, rather than hand-building the graph.
 
@@ -85,34 +85,34 @@ Run both in one pod in the `platform` namespace, mcpo as the entrypoint and the 
 - The generator lives in a **separate n8n project** from what it generates, and its credential must not be able to `PUT` its own ID.
 - Validate before `POST`. A malformed graph that n8n half-accepts is far more work to unpick than a rejected one.
 
-**Done when** "every morning at seven, summarise yesterday's agent runs and email it to me" produces a deactivated workflow with a cron trigger, a Postgres query and a Gmail node from phase 22 — and you activate it by hand.
+**Done when** "every morning at seven, summarise yesterday's agent runs and email it to me" produces a deactivated workflow with a cron trigger, a Postgres query and a Gmail node from phase 23 — and you activate it by hand.
 
-## Phase 25 — the dashboard
+## Phase 26 — the dashboard
 
 **Goal.** One page answering "what is my system doing" without a terminal.
 
-**Grafana, not a bespoke UI**, on **4400**, with Postgres as its datasource. The reason is that almost all of the state is already in Postgres — `agent_runs`, `agent_role_performance`, the queue tables from phase 21, LiteLLM's own spend tables, and phase 23's `dictations` — so the only work is SQL. A hand-written page would mean rebuilding panels, auth and alerting that Grafana ships. The one non-SQL source is the GPU probe on 8101, which Grafana reads as JSON.
+**Grafana, not a bespoke UI**, on **4400**, with Postgres as its datasource. The reason is that almost all of the state is already in Postgres — `agent_runs`, `agent_role_performance`, the queue tables from phase 21, LiteLLM's own spend tables, and phase 24's `dictations` — so the only work is SQL. A hand-written page would mean rebuilding panels, auth and alerting that Grafana ships. The one non-SQL source is the GPU probe on 8101, which Grafana reads as JSON.
 
 **Panels, in the order they answer questions:**
 
 - **Now** — GPU utilisation, VRAM and system RAM from the probe on 8101; which Strata pack is resident; queue depth and current waiters.
 - **Agents** — runs per role per day, pass rate by role version, and the latest failures with their prompts. This is the view that tells you whether a promoted prompt actually helped.
 - **Spend and volume** — LiteLLM token counts by model alias. Notional dollars against local models, useful as a proxy for volume and real once a cloud alias is in the list.
-- **Workflows** — n8n executions, successes and failures, and anything phase 24 generated but you have not activated.
+- **Workflows** — n8n executions, successes and failures, and anything phase 25 generated but you have not activated.
 - **Dictation** — recent transcripts with their chosen action and confidence, lowest confidence first, because that list is the backlog for improving the classifier.
 - **Housekeeping** — last successful backup from phase 18 and Argo CD sync status from phase 20, both of which fail silently and are therefore worth a panel.
 
 Loopback-bound like everything else, published to your own devices with `tailscale serve` as described in [remote-access.md](remote-access.md). Grafana has real authentication, so it is one of the few services here that *could* be shared — but the decision about reaching this machine from outside the tailnet is still open, so leave it on the tailnet and never use `tailscale funnel`.
 
-**Last deliberately.** It visualises phases 21 through 24, so building it earlier means building it twice.
+**Last deliberately.** It visualises phases 21 through 25, so building it earlier means building it twice.
 
-## Phase 26 — the medic
+## Phase 27 — the medic
 
 **Goal.** Ask the machine what is wrong with it and get a useful answer, instead of reading `journalctl` at midnight.
 
 **Why it is nearly free.** [`status.sh`](../status.sh) already produces the hard part: a structured, symptom-indexed report of every phase, marking each check done, missing or wrong. Its closing line is already "paste this whole report into the chat to get it read back to you" — this phase removes the pasting. The model it feeds is the local one, so nothing about your system's internals leaves the machine.
 
-**What to build.** `server/13-medic.sh` installs a `medic` role in `agent_roles` and an `ai-medic` command. The command gathers a context bundle, sends it to the `medic` role through LiteLLM, and prints the diagnosis.
+**What to build.** `server/14-medic.sh` installs a `medic` role in `agent_roles` and an `ai-medic` command. The command gathers a context bundle, sends it to the `medic` role through LiteLLM, and prints the diagnosis.
 
 The bundle is a fixed set of read-only commands, not anything the model chooses: `status.sh`, `systemctl --failed`, `journalctl -p err -b` for the current boot, `kubectl get events --sort-by=.lastTimestamp`, `kubectl get pods -A`, `nvidia-smi`, `df -h`, `free -g`, and `dmesg -l err,crit`. Cap it — the last few hundred lines of each — because a 14B model with a 32k context is the consumer and a log flood pushes the real error out of the window.
 
@@ -130,6 +130,6 @@ The bundle is a fixed set of read-only commands, not anything the model chooses:
 
 In numeric order, and each phase is finished and used for a few days before the next one starts.
 
-22 comes first because it is the one that makes the agent layer able to touch real data, and because its failure mode — an over-permissioned tool — is the only one here that can do damage outside the machine. 23 depends on nothing but is far more useful once there is something worth dictating *to*. 24 needs 22 for its workflows to be worth generating. 25 needs the rest to exist before it has anything to show. 26 depends only on phase 15 and could be built at any point — do it first if the stack is misbehaving, since it is the smallest of the five by a wide margin.
+23 comes first because it is the one that makes the agent layer able to touch real data, and because its failure mode — an over-permissioned tool — is the only one here that can do damage outside the machine. 24 depends on nothing but is far more useful once there is something worth dictating *to*. 25 needs 23 for its workflows to be worth generating. 26 needs the rest to exist before it has anything to show. 27 depends only on phase 15 and could be built at any point — do it first if the stack is misbehaving, since it is the smallest of the five by a wide margin.
 
 All four assume the phase 11 memory upgrade, not because they are memory-hungry — together they are perhaps 2 GB of pods — but because they add steady background load to a machine whose model packs already pin 25 to 40 GB. See [ram-upgrade-decision.md](ram-upgrade-decision.md).

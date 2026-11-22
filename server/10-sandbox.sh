@@ -1,10 +1,20 @@
 #!/usr/bin/env bash
 # Phase 22 - the code sandbox n8n's Assistant runs generated code in.
+# (Phases 23 to 27 in reference/roadmap.md shifted up by one to make room.)
 #
 #   ./10-sandbox.sh            check and report, change nothing
 #   ./10-sandbox.sh --apply    build the VM and wire n8n to it
 #   ./10-sandbox.sh --status   what exists right now
+#   ./10-sandbox.sh --shell    a root-capable shell inside the guest
+#   ./10-sandbox.sh --logs     follow the sandbox container logs
+#   ./10-sandbox.sh --restart  restart the containers, keep the VM
 #   ./10-sandbox.sh --destroy  remove the VM and the cluster bridge
+#
+# Re-running --apply is safe and is the intended way to repair a half-built
+# sandbox. There is exactly one VM, because it is addressed by name and the
+# script starts the existing one rather than launching a second; exactly one
+# set of containers, because compose reconciles a named project rather than
+# adding to it; and one lock, so two copies of this script cannot interleave.
 #
 # This is the only component in the kit that exists to run code written by a
 # model. Everything else runs code you chose. That difference is the whole
@@ -61,12 +71,16 @@ REPO_RAW=https://raw.githubusercontent.com/n8n-io/n8n-sandbox-service/refs/heads
 APPLY=no
 DESTROY=no
 STATUS_ONLY=no
+ACTION=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --apply)   APPLY=yes; shift ;;
         --destroy) DESTROY=yes; shift ;;
         --status)  STATUS_ONLY=yes; shift ;;
-        -h|--help) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        --shell)   ACTION=shell; shift ;;
+        --logs)    ACTION=logs; shift ;;
+        --restart) ACTION=restart; shift ;;
+        -h|--help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) die "Unknown option: $1" ;;
     esac
 done
@@ -85,6 +99,35 @@ vm_field() {
 }
 vm_running() { [[ "$(vm_field State)" == "Running" ]]; }
 vm_ip()      { vm_field IPv4 | cut -d\; -f1; }
+
+# Everything that touches the guest goes through compose in one directory, so
+# the project name is fixed and a second run reconciles the containers that
+# are already there instead of starting a parallel set beside them.
+SANDBOX_DIR=/home/ubuntu/sandbox
+in_vm()    { multipass exec "$VM_NAME" -- bash -c "$1"; }
+compose()  { in_vm "cd $SANDBOX_DIR && sudo docker compose -p sandbox $*"; }
+api_up()   { curl -fsS --max-time 5 "http://$1:$SANDBOX_PORT/healthz" >/dev/null 2>&1; }
+
+need_vm() {
+    have multipass && vm_exists || die "No sandbox VM. Build it with --apply."
+    vm_running || die "VM $VM_NAME is stopped. 'multipass start $VM_NAME'"
+}
+
+case "$ACTION" in
+    shell)
+        need_vm
+        echo "Entering $VM_NAME. The service lives in $SANDBOX_DIR. 'exit' to leave."
+        exec multipass shell "$VM_NAME" ;;
+    logs)
+        need_vm
+        exec multipass exec "$VM_NAME" -- \
+             bash -c "cd $SANDBOX_DIR && sudo docker compose -p sandbox logs -f --tail=100" ;;
+    restart)
+        need_vm
+        compose "up -d --force-recreate" || die "Restart failed. --logs to see why."
+        ok "Containers restarted."
+        exit 0 ;;
+esac
 
 # ---------------------------------------------------------------------------
 if [[ "$DESTROY" == yes ]]; then
@@ -105,15 +148,27 @@ fi
 # ---------------------------------------------------------------------------
 section "Status"
 
+ip=""
 if have multipass && vm_exists; then
     ip="$(vm_ip)"
+
+    # There is only ever one VM with this name, but say so explicitly: the
+    # thing people worry about after a failed run is a second copy quietly
+    # holding 6 GB, and multipass is the only honest witness to that.
+    others="$(multipass list --format csv 2>/dev/null |
+              awk -F, -v me="$VM_NAME" 'NR>1 && $1!=me && $1 ~ /sandbox/ {print $1}')"
+    [[ -n "$others" ]] && warn "Other sandbox-like VMs exist: $(tr '\n' ' ' <<<"$others")"
+
     if vm_running; then
-        ok "VM $VM_NAME is running at ${ip:-unknown}"
-        if curl -fsS --max-time 5 "http://${ip}:${SANDBOX_PORT}/healthz" >/dev/null 2>&1; then
+        ok "VM $VM_NAME running at ${ip:-unknown}, ${VM_CPUS} CPUs, ${VM_MEM} RAM"
+        if api_up "$ip"; then
             ok "Sandbox API answering on ${ip}:${SANDBOX_PORT}"
         else
-            warn "VM is up but the API is not answering yet."
+            warn "VM is up but the API is not answering. --logs to see why."
         fi
+        running="$(compose "ps --services --filter status=running" 2>/dev/null | tr '\n' ' ')"
+        [[ -n "${running// }" ]] && info "Containers: ${running% }" \
+                                 || warn "No containers running. --restart, or --apply to rebuild."
     else
         warn "VM $VM_NAME exists but is stopped. 'multipass start $VM_NAME'"
     fi
@@ -123,8 +178,22 @@ fi
 
 if kubectl get svc sandbox -n "$K8S_NS" >/dev/null 2>&1; then
     ok "Cluster name: sandbox.$K8S_NS.svc.cluster.local:$SANDBOX_PORT"
+
+    # A guest that was rebuilt or simply rebooted can come back on a new
+    # address, and nothing in the cluster notices: the Service still
+    # resolves, the EndpointSlice still looks valid, and n8n just times out.
+    bridged="$(kubectl get endpointslice sandbox-vm -n "$K8S_NS" \
+               -o jsonpath='{.endpoints[0].addresses[0]}' 2>/dev/null || true)"
+    if [[ -n "$ip" && -n "$bridged" && "$ip" != "$bridged" ]]; then
+        warn "The bridge points at $bridged but the VM is at $ip."
+        warn "Re-run with --apply to correct it."
+    fi
 else
     info "No cluster bridge yet."
+fi
+
+if [[ -f "$SECRETS/sandbox-api-key" ]]; then
+    ok "API key: sudo cat $SECRETS/sandbox-api-key"
 fi
 
 [[ "$STATUS_ONLY" == yes ]] && exit 0
@@ -160,6 +229,13 @@ if [[ "$APPLY" != yes ]]; then
     warn "Read-only. Re-run with --apply to build it."
     exit 0
 fi
+
+# A second --apply started while the first is still launching the guest is
+# the one way to end up with a mess: both see no VM, both call launch, and
+# multipass fails the loser halfway through. Non-blocking on purpose - the
+# right answer is to tell the operator, not to queue behind a ten-minute run.
+exec 9>"${TMPDIR:-/tmp}/r1wc-sandbox.lock"
+flock -n 9 || die "Another copy of this script is already running."
 
 # ---------------------------------------------------------------------------
 section "multipass"
@@ -276,20 +352,21 @@ printf '%s\n' \
 ok "Credentials written to the guest."
 
 info "Starting the sandbox containers."
-multipass exec "$VM_NAME" -- bash -c '
-    cd /home/ubuntu/sandbox && sudo docker compose up -d' \
-    || die "docker compose failed. 'multipass shell $VM_NAME' then 'cd sandbox && sudo docker compose logs'."
+# -p pins the project name. compose then reconciles the set of containers it
+# already owns - a second run restarts them rather than starting a parallel
+# stack - and the name stays the same even if the directory is ever moved.
+compose "up -d --remove-orphans" \
+    || die "docker compose failed. Run './10-sandbox.sh --logs' to see why."
 
 info "Waiting for the API to answer (up to 120s)."
 for _ in $(seq 1 24); do
-    if curl -fsS --max-time 5 "http://${IP}:${SANDBOX_PORT}/healthz" >/dev/null 2>&1; then
+    if api_up "$IP"; then
         ok "Sandbox API healthy on ${IP}:${SANDBOX_PORT}"
         break
     fi
     sleep 5
 done
-curl -fsS --max-time 5 "http://${IP}:${SANDBOX_PORT}/healthz" >/dev/null 2>&1 \
-    || warn "Not answering yet. Check: multipass exec $VM_NAME -- sudo docker compose -f /home/ubuntu/sandbox/compose.yaml logs"
+api_up "$IP" || warn "Not answering yet. Run './10-sandbox.sh --logs'."
 
 # ---------------------------------------------------------------------------
 section "Cluster bridge"
@@ -362,11 +439,16 @@ cat <<EOF
 
   Managing it:
 
+      ./10-sandbox.sh --status     what exists and whether it answers
+      ./10-sandbox.sh --shell      a shell inside the guest
+      ./10-sandbox.sh --logs       follow the container logs
+      ./10-sandbox.sh --restart    restart the containers, keep the VM
+      ./10-sandbox.sh --apply      safe to re-run; repairs a broken build
+      ./10-sandbox.sh --destroy    remove the VM and the bridge
       multipass stop $VM_NAME      reclaim ${VM_MEM} of RAM
       multipass start $VM_NAME     and give it back
-      multipass shell $VM_NAME     a shell in the guest
-      ./10-sandbox.sh --status     is any of it running
-      ./10-sandbox.sh --destroy    remove the VM and the bridge
+
+  Or r1wc, where the sandbox is an ordinary row with start and stop.
 
   The VM does not start itself at boot. That is deliberate - it is the
   single largest optional consumer of memory on this machine, and at 32 GB

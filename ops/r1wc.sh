@@ -170,13 +170,25 @@ item_status() {
             # A VM, not a unit and not a pod. 'not built' and 'stopped' are
             # different answers worth distinguishing: the first needs
             # 10-sandbox.sh --apply, the second needs multipass start.
+            #
+            # A booted guest whose containers have not come up looks
+            # identical to a working one from the outside, so the running
+            # state is the API answering rather than the VM existing.
             if ! have multipass; then printf -- '-'
             elif ! multipass info n8n-sandbox >/dev/null 2>&1; then printf 'not built'
-            elif multipass info n8n-sandbox --format csv 2>/dev/null |
-                 awk -F, '
-                     NR==1 { for (i=1;i<=NF;i++) if ($i=="State") c=i; next }
-                     NR==2 { exit !(c && $c=="Running") }'; then printf 'running'
-            else printf 'stopped'; fi ;;
+            else
+                sb_ip="$(multipass info n8n-sandbox --format csv 2>/dev/null |
+                         awk -F, '
+                             NR==1 { for (i=1;i<=NF;i++) {
+                                         if ($i=="State") s=i
+                                         if ($i=="IPv4")  p=i }; next }
+                             NR==2 { if (s && $s=="Running" && p) print $p }' |
+                         cut -d\; -f1)"
+                if [[ -z "$sb_ip" ]]; then printf 'stopped'
+                elif curl -fsS --max-time 2 "http://$sb_ip:8080/healthz" \
+                     >/dev/null 2>&1; then printf 'running'
+                else printf 'no api'; fi
+            fi ;;
         pause)
             # ai-pause records what it scaled down; the directory existing
             # and being non-empty is what "currently paused" means.
@@ -654,12 +666,36 @@ EOF
     sandbox) cat <<'EOF'
 Code sandbox - where n8n's Assistant runs the code it writes.
 
-  Build   server/10-sandbox.sh --apply
-  Start   multipass start n8n-sandbox      costs 6 GB of RAM
-  Stop    multipass stop n8n-sandbox       gives it back
-  Shell   multipass shell n8n-sandbox
-  Check   server/10-sandbox.sh --status
-  Remove  server/10-sandbox.sh --destroy
+  Build    server/10-sandbox.sh --apply     safe to re-run at any time
+  Check    server/10-sandbox.sh --status
+  Shell    server/10-sandbox.sh --shell     a shell inside the guest
+  Logs     server/10-sandbox.sh --logs      follow the containers
+  Restart  server/10-sandbox.sh --restart   containers only, keep the VM
+  Remove   server/10-sandbox.sh --destroy
+  Start    multipass start n8n-sandbox      costs 6 GB of RAM
+  Stop     multipass stop n8n-sandbox       gives it back
+
+  Re-running --apply never builds a second sandbox. The VM is addressed
+  by name, so an existing one is started rather than duplicated; the
+  containers are one named compose project, so they are reconciled rather
+  than added to; and a lock file stops two copies of the script running at
+  once. Re-running is in fact the intended repair for a half-built
+  sandbox - it picks up wherever the last attempt stopped.
+
+  Status here means the API answered, not that the VM booted. A guest
+  whose containers failed to start looks identical from the outside, so
+  this row shows 'no api' for that case rather than 'running'.
+
+  Getting inside it:
+
+      server/10-sandbox.sh --shell      most of the time
+      multipass shell n8n-sandbox       the same thing, directly
+      ssh ubuntu@<ip>                   only after adding your own key
+
+  multipass manages the guest's SSH credentials itself and does not place
+  your key in it, so plain ssh does not work until you add one. There is
+  rarely a reason to - the service lives in /home/ubuntu/sandbox and the
+  shell above is already root-capable through sudo.
 
   This is the only part of the stack that exists to run code a model wrote
   rather than code you chose, which is why it lives in a virtual machine
@@ -940,8 +976,8 @@ draw_menu() {
         MENU_IDS+=("$id")
         st="$(item_status "$id")"
         case "$st" in
-            running) colour="$_C_GREEN" ;;
-            PAUSED)  colour="$_C_YELLOW" ;;
+            running)  colour="$_C_GREEN" ;;
+            PAUSED|no\ api) colour="$_C_YELLOW" ;;
             *)       colour="$_C_RESET" ;;
         esac
         # Built rather than padded, so rows without a port or a [gpu] tag do

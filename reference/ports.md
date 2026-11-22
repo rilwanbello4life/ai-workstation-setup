@@ -33,8 +33,11 @@ Open WebUI defaults to **8080**, which collides with Strata, so always start it 
 | **GPU probe** | 8101 | `http://127.0.0.1:8101/gpu` | Host process, not a pod; read-only JSON |
 | **git daemon** | 9418 | `git://` | Host process; serves `/srv/gitops.git` read-only to the cluster |
 | **Postgres** | 5432 | — | ClusterIP only; not forwarded to loopback |
+| **Code sandbox** | 8080 | `http://sandbox.platform.svc.cluster.local:8080` | Inside the `n8n-sandbox` VM, not a pod |
 
-These run as pods, except the GPU probe and the git daemon, which are host systemd units that the cluster reaches through the cni0 bridge. `platform-forward.service` port-forwards 4000, 4100, 5678, 3000 and 8090 to `127.0.0.1`, which is what keeps them compatible with the `tailscale serve` map below. Postgres is deliberately not forwarded — reach it with `kubectl -n platform exec -it deploy/postgres -- psql`.
+The sandbox reuses 8080 without colliding with Strata, because the two are on different machines: Strata binds 8080 on the host, the sandbox binds 8080 inside the guest, and the cluster reaches the guest on its own address. It is deliberately not forwarded to `127.0.0.1` — nothing but n8n has any business calling it, and a loopback forward would put an unauthenticated code-execution API next to Strata's.
+
+These run as pods, except the GPU probe and the git daemon, which are host systemd units that the cluster reaches through the cni0 bridge, and the sandbox, which is a VM reached the same way. `platform-forward.service` port-forwards 4000, 4100, 5678, 3000 and 8090 to `127.0.0.1`, which is what keeps them compatible with the `tailscale serve` map below. Postgres is deliberately not forwarded — reach it with `kubectl -n platform exec -it deploy/postgres -- psql`.
 
 **Ports 4000 and 4100 are the ones that change the security model.** Everything else on this page is unauthenticated and therefore loopback-only forever. LiteLLM has real keys with budgets and rate limits; the queue forwards those same keys to it rather than replacing them, so both are safe to share. See [sharing-with-friends.md](sharing-with-friends.md).
 

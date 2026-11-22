@@ -66,6 +66,7 @@ ai-workstation-setup/
 │   ├── 07-backup.sh             Nightly local + encrypted offsite backups
 │   ├── 08-gitops.sh             Argo CD and the render-commit-sync pipeline
 │   ├── 09-gpu-queue.sh          Fair GPU sharing, per-person profiles, batch jobs
+│   ├── 10-sandbox.sh            Isolated VM where the n8n Assistant runs code
 │   ├── gitops/                  Helm charts and Argo CD Applications
 │   ├── gpu-probe/               Host GPU reporter the queue reads
 │   └── k8s/                     Manifests, applied in numeric order
@@ -102,7 +103,7 @@ ai-workstation-setup/
     ├── remote-access.md         Reaching the models from a phone or laptop
     ├── strata-models.md         Full model catalogue, 64 GB and 96 GB tiers
     ├── ram-upgrade-decision.md  Phase 11: add or swap, and what each costs
-    ├── roadmap.md               Phases 22-25: MCP, dictation, authoring, dashboard
+    ├── roadmap.md               Phases 23-27: MCP, dictation, authoring, dashboard
     ├── 4tb-upgrade.md           What a bigger drive buys, and the cherry-pick list
     └── troubleshooting.md       Symptom-indexed fixes
 ```
@@ -142,8 +143,9 @@ Phases 12 onward turn the Ubuntu side into the always-on server. They are indepe
 | 19 | Gaming on Ubuntu *(optional)* | Linux | [ubuntu/09-gaming.sh](ubuntu/09-gaming.sh) |
 | 20 | GitOps: Argo CD watching a local repo *(optional)* | Linux | [server/08-gitops.sh](server/08-gitops.sh) |
 | 21 | GPU queue: fair sharing and per-person profiles *(optional)* | Linux | [server/09-gpu-queue.sh](server/09-gpu-queue.sh) |
+| 22 | Code sandbox for the n8n Assistant *(optional)* | Linux | [server/10-sandbox.sh](server/10-sandbox.sh) |
 
-**Phases 22 to 26 are specified but not built**: an MCP gateway putting Gmail, Drive and Calendar in reach of the agents, a dictation front door that decides what to do with what you said, an agent that writes n8n workflows, a dashboard over all of it, and a read-only medic that diagnoses the machine from `status.sh` and the logs. [reference/roadmap.md](reference/roadmap.md) gives each one its files, its port and the decisions already taken, so building them is implementation rather than design. Nothing in phases 1 to 21 depends on them.
+**Phases 23 to 27 are specified but not built**: an MCP gateway putting Gmail, Drive and Calendar in reach of the agents, a dictation front door that decides what to do with what you said, an agent that writes n8n workflows, a dashboard over all of it, and a read-only medic that diagnoses the machine from `status.sh` and the logs. [reference/roadmap.md](reference/roadmap.md) gives each one its files, its port and the decisions already taken, so building them is implementation rather than design. Nothing in phases 1 to 22 depends on them.
 
 Most scripted phases have a manual equivalent — Windows phases 1, 2, 4, 5, 6 and 10 in [reference/manual-windows.md](reference/manual-windows.md), phase 8 in [reference/manual-ubuntu.md](reference/manual-ubuntu.md), and phases 12–18 in [reference/manual-server.md](reference/manual-server.md). Phases 20 and 21 do not have one; they are documented by behaviour instead, in [reference/gitops.md](reference/gitops.md) and [reference/gpu-queue.md](reference/gpu-queue.md).
 
