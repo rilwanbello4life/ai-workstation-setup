@@ -118,11 +118,19 @@ gen_secret() {
 # Read a secret from a file, creating it on first call. Means re-running a
 # script does not invalidate credentials already handed to clients.
 secret_file() {
-    local path="$1" bytes="${2:-24}"
+    local path="$1" bytes="${2:-24}" dir
+    dir="$(dirname "$path")"
     if [[ ! -f "$path" ]]; then
-        sudo mkdir -p "$(dirname "$path")"
+        sudo mkdir -p "$dir"
         gen_secret "$bytes" | sudo tee "$path" >/dev/null
         sudo chmod 600 "$path"
     fi
+    # Every run, not just on creation. mkdir -p takes the default umask, so
+    # the directory lands at 755 and anyone on the machine can list which
+    # credentials exist and how recently each changed. The files themselves
+    # are 600, so this is not a disclosure of the secrets - but it is free
+    # to close, and an existing install needs it repaired rather than
+    # merely avoided next time.
+    sudo chmod 700 "$dir"
     sudo cat "$path"
 }

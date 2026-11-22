@@ -143,11 +143,48 @@ section "Loopback access"
 # systemd unit port-forwards the three that humans use to 127.0.0.1, which
 # keeps them compatible with the existing tailscale serve mapping.
 FWD_UNIT=/etc/systemd/system/platform-forward.service
-if [[ -f "$FWD_UNIT" ]]; then
+
+# Each forward gets its own retry loop.
+#
+# 'kubectl port-forward' binds to one pod, so it exits the moment that pod
+# is replaced - a rollout, a node reboot, an OOM kill. The first version of
+# this unit started three forwards and then called 'wait', which only
+# returns once they have ALL exited. One dying left the unit sitting
+# happily active with a dead forward and nothing listening, and systemd's
+# Restart=always never fired because nothing had stopped.
+#
+# That is the worst failure shape available: the service reports healthy,
+# the pods report 1/1, and the port is simply gone. Wrapping each forward
+# in its own loop means one dying is repaired within five seconds without
+# disturbing the other three.
+#
+# Built as a string rather than a multi-line ExecStart so that Argo CD's
+# forward can be included conditionally without leaving a dangling line
+# continuation when it is absent.
+fwd_loop() {
+    printf 'while :; do kubectl -n %s port-forward --address 127.0.0.1 %s %s; sleep 5; done & ' \
+           "$1" "$2" "$3"
+}
+
+# Keep Argo CD's forward if 08-gitops.sh has already added it, rather than
+# silently dropping port 8090 when this script is re-run.
+ARGO_FWD=""
+if [[ -f "$FWD_UNIT" ]] && grep -q '8090:80' "$FWD_UNIT"; then
+    ARGO_FWD="$(fwd_loop argocd svc/argocd-server 8090:80)"
+fi
+
+FWD_MARK="platform-forward v2"
+FWD_CMD="$(fwd_loop "$K8S_NS" svc/litellm 4000:4000)"
+FWD_CMD+="$(fwd_loop "$K8S_NS" svc/n8n 5678:5678)"
+FWD_CMD+="$(fwd_loop "$K8S_NS" svc/open-webui 3000:3000)"
+FWD_CMD+="${ARGO_FWD}wait"
+
+if [[ -f "$FWD_UNIT" ]] && grep -q "$FWD_MARK" "$FWD_UNIT"; then
     ok "platform-forward already installed."
 else
     sudo tee "$FWD_UNIT" >/dev/null <<EOF
 [Unit]
+# $FWD_MARK
 Description=Expose platform services on loopback
 After=k3s.service
 Wants=k3s.service
@@ -156,14 +193,9 @@ Wants=k3s.service
 Type=simple
 User=$USER
 Environment=KUBECONFIG=$HOME/.kube/config
-# Three forwards in one unit. --address 127.0.0.1 is the default but stated
-# explicitly: binding 0.0.0.0 here would put an unauthenticated gateway on
-# the LAN.
-ExecStart=/bin/sh -c '\
-  kubectl -n $K8S_NS port-forward --address 127.0.0.1 svc/litellm 4000:4000 & \
-  kubectl -n $K8S_NS port-forward --address 127.0.0.1 svc/n8n 5678:5678 & \
-  kubectl -n $K8S_NS port-forward --address 127.0.0.1 svc/open-webui 3000:3000 & \
-  wait'
+# --address 127.0.0.1 is the default but stated explicitly: binding 0.0.0.0
+# here would put an unauthenticated gateway on the LAN.
+ExecStart=/bin/sh -c '$FWD_CMD'
 Restart=always
 RestartSec=10
 
@@ -171,8 +203,9 @@ RestartSec=10
 WantedBy=multi-user.target
 EOF
     sudo systemctl daemon-reload
-    sudo systemctl enable --now platform-forward.service
-    ok "Forwarding 4000, 5678 and 3000 to loopback."
+    sudo systemctl enable platform-forward.service >/dev/null 2>&1 || true
+    sudo systemctl restart platform-forward.service
+    ok "Forwarding 4000, 5678 and 3000 to loopback, each self-healing."
 fi
 
 sleep 3

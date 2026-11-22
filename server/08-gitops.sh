@@ -325,11 +325,29 @@ section "Loopback access"
 # platform-forward already publishes 4000, 5678 and 3000. Argo CD's UI joins
 # them on 8090 rather than getting an ingress of its own.
 FWD_UNIT=/etc/systemd/system/platform-forward.service
-if [[ -f "$FWD_UNIT" ]] && grep -q '8090:80' "$FWD_UNIT"; then
+FWD_MARK="platform-forward v2"
+
+# Each forward in its own retry loop. 03-platform.sh carries the full
+# reasoning; briefly, 'kubectl port-forward' exits when its pod is
+# replaced, and a single 'wait' over all four hides that completely - the
+# unit stays active, the pods stay 1/1, and the port is simply gone.
+fwd_loop() {
+    printf 'while :; do kubectl -n %s port-forward --address 127.0.0.1 %s %s; sleep 5; done & ' \
+           "$1" "$2" "$3"
+}
+
+FWD_CMD="$(fwd_loop "$K8S_NS" svc/litellm 4000:4000)"
+FWD_CMD+="$(fwd_loop "$K8S_NS" svc/n8n 5678:5678)"
+FWD_CMD+="$(fwd_loop "$K8S_NS" svc/open-webui 3000:3000)"
+FWD_CMD+="$(fwd_loop "$ARGO_NS" svc/argocd-server 8090:80)wait"
+
+if [[ -f "$FWD_UNIT" ]] && grep -q '8090:80' "$FWD_UNIT" \
+   && grep -q "$FWD_MARK" "$FWD_UNIT"; then
     ok "platform-forward already publishes 8090."
 else
     sudo tee "$FWD_UNIT" >/dev/null <<EOF
 [Unit]
+# $FWD_MARK
 Description=Expose platform services on loopback
 After=k3s.service
 Wants=k3s.service
@@ -340,12 +358,7 @@ User=$USER
 Environment=KUBECONFIG=$HOME/.kube/config
 # --address 127.0.0.1 is the default but stated explicitly: binding 0.0.0.0
 # here would put an unauthenticated gateway on the LAN.
-ExecStart=/bin/sh -c '\\
-  kubectl -n $K8S_NS port-forward --address 127.0.0.1 svc/litellm 4000:4000 & \\
-  kubectl -n $K8S_NS port-forward --address 127.0.0.1 svc/n8n 5678:5678 & \\
-  kubectl -n $K8S_NS port-forward --address 127.0.0.1 svc/open-webui 3000:3000 & \\
-  kubectl -n $ARGO_NS port-forward --address 127.0.0.1 svc/argocd-server 8090:80 & \\
-  wait'
+ExecStart=/bin/sh -c '$FWD_CMD'
 Restart=always
 RestartSec=10
 
@@ -355,7 +368,7 @@ EOF
     sudo systemctl daemon-reload
     sudo systemctl enable platform-forward.service >/dev/null 2>&1 || true
     sudo systemctl restart platform-forward.service
-    ok "Forwarding 4000, 5678, 3000 and 8090 to loopback."
+    ok "Forwarding 4000, 5678, 3000 and 8090 to loopback, each self-healing."
     note_change
 fi
 
