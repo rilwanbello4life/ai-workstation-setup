@@ -363,6 +363,16 @@ Strata - the MoE packs, the main local model server.
   Expect the desktop to be unresponsive for one to three minutes while a
   pack loads: 35-62 GB is read into RAM and partly pinned for the GPU.
 
+  If STRATA_ALLOWED_HOSTS is empty in your shell, the generated env file
+  predates it. ops/switch.sh exports it regardless, so starting Strata
+  from here is already correct, but to fix the shell too:
+
+      ubuntu/11-shell-env.sh      rewrites ~/.config/ai-workstation/env.sh
+
+  Then open a new terminal and restart the pack - Strata reads the value
+  once, at startup, so setting it in a shell later changes nothing until
+  the pack is reloaded.
+
   Full catalogue and quality numbers: reference/strata-models.md
 EOF
     ;;

@@ -124,6 +124,16 @@ strata)
         ai-pause --cluster || ai-pause || true
     fi
 
+    # Set here as well as in the generated shell environment, because this
+    # is the one that cannot go stale. The shell file is only rewritten when
+    # a setup script runs, so a machine installed before that value existed
+    # keeps launching Strata without it - and the symptom appears three hops
+    # away, as a provider error in n8n or Open WebUI rather than as Strata
+    # declining a Host header. Exported, not assumed: Strata reads it once,
+    # at startup, so a value added to the shell later does nothing until the
+    # pack is restarted.
+    export STRATA_ALLOWED_HOSTS="${STRATA_ALLOWED_HOSTS:-localhost,127.0.0.1,strata.platform.svc.cluster.local,strata.platform.svc,strata,10.42.0.1}"
+
     info "Loading. The desktop will be sluggish for 1-3 minutes."
     strata launch --preset "$ARG" --yes --no-tui \
         || die "Strata failed to launch. Try: strata launch --preset $ARG"

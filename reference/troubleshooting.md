@@ -172,6 +172,8 @@ strata launch --family qwen36 --model UD-Q4_K_XL --yes --no-tui
 
 It must be set **in the shell that launches Strata** — it is read at startup, so exporting it afterwards changes nothing until the next launch.
 
+**If it is empty again,** the generated env file predates the value and nothing rewrote it: `env.sh` is only regenerated when a setup script runs, so a bump to the kit does not reach an installed machine until you run one. `./ubuntu/11-shell-env.sh` is that script, and it is safe to re-run. `ops/switch.sh` now exports the value itself before launching, so Strata started through `switch.sh` or `r1wc` is correct regardless of what the shell holds — but a pack already loaded keeps the environment it started with, so restart it.
+
 Strata's other suggestion, setting an `api_key`, disables the check entirely rather than narrowing it. That is a reasonable thing to want, since Strata has no authentication otherwise, but it is a larger change: the same key has to go into `api_key` for every Strata entry in LiteLLM's `model_list`, in both `server/k8s/11-litellm.yaml` and the chart's `_helpers.tpl`, and those two must stay byte-identical or Argo CD reads the difference as drift.
 
 **The PC freezes for minutes on first start.**
