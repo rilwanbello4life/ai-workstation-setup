@@ -72,8 +72,19 @@ while [[ $# -gt 0 ]]; do
 done
 
 vm_exists()  { multipass info "$VM_NAME" >/dev/null 2>&1; }
-vm_running() { [[ "$(multipass info "$VM_NAME" --format csv 2>/dev/null | awk -F, 'NR==2{print $2}')" == "Running" ]]; }
-vm_ip()      { multipass info "$VM_NAME" --format csv 2>/dev/null | awk -F, 'NR==2{print $3}'; }
+
+# Read one column out of multipass's CSV by its header name. Positional
+# fields are not safe here: 1.17 added a Zone column ahead of IPv4, so a
+# hard-coded $3 returns the availability zone on a new multipass and the
+# address on an old one.
+vm_field() {
+    multipass info "$VM_NAME" --format csv 2>/dev/null |
+    awk -F, -v want="$1" '
+        NR==1 { for (i=1; i<=NF; i++) if (tolower($i) == tolower(want)) col=i; next }
+        NR==2 && col { print $col }'
+}
+vm_running() { [[ "$(vm_field State)" == "Running" ]]; }
+vm_ip()      { vm_field IPv4 | cut -d\; -f1; }
 
 # ---------------------------------------------------------------------------
 if [[ "$DESTROY" == yes ]]; then
@@ -216,13 +227,30 @@ else
         fi' || die "Docker install failed."
 
     info "Installing Sysbox. This replaces the guest's container runtime and takes a few minutes."
+    # The setup script ends by checking that sysbox is running, and that
+    # check fails here even though the package installed cleanly: dpkg's
+    # postinst cannot reach systemd over a non-interactive multipass exec
+    # ("Could not execute systemctl" from deb-systemd-invoke), so the units
+    # are written and enabled but never started. So the install is allowed
+    # to report failure, and the units are started from the next step.
     multipass exec "$VM_NAME" -- bash -c "
-        set -e
         cd /home/ubuntu
         curl -fsSL -o setup-sysbox.sh $REPO_RAW/scripts/setup-sysbox.sh
         chmod +x setup-sysbox.sh
-        sudo ./setup-sysbox.sh" || die "Sysbox install failed. 'multipass shell $VM_NAME' to investigate."
-    ok "Sysbox installed."
+        sudo ./setup-sysbox.sh" || true
+
+    info "Starting sysbox and reloading Docker."
+    multipass exec "$VM_NAME" -- bash -c '
+        set -e
+        sudo systemctl daemon-reload
+        sudo systemctl enable --now sysbox
+        sudo systemctl restart docker' \
+        || die "Could not start sysbox. 'multipass shell $VM_NAME' then 'systemctl status sysbox'."
+
+    multipass exec "$VM_NAME" -- docker info --format '{{json .Runtimes}}' 2>/dev/null |
+        grep -q sysbox-runc \
+        || die "sysbox-runc is not a Docker runtime in the guest. 'multipass shell $VM_NAME' to investigate."
+    ok "Sysbox installed and running."
 fi
 
 # ---------------------------------------------------------------------------

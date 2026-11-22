@@ -173,7 +173,9 @@ item_status() {
             if ! have multipass; then printf -- '-'
             elif ! multipass info n8n-sandbox >/dev/null 2>&1; then printf 'not built'
             elif multipass info n8n-sandbox --format csv 2>/dev/null |
-                 awk -F, 'NR==2{exit $2!="Running"}'; then printf 'running'
+                 awk -F, '
+                     NR==1 { for (i=1;i<=NF;i++) if ($i=="State") c=i; next }
+                     NR==2 { exit !(c && $c=="Running") }'; then printf 'running'
             else printf 'stopped'; fi ;;
         pause)
             # ai-pause records what it scaled down; the directory existing
