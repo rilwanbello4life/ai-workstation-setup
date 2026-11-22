@@ -586,6 +586,17 @@ multipass exec n8n-sandbox -- sudo test -S /run/sysbox/sysfs.sock && echo ok
 
 `./10-sandbox.sh --apply` checks this on every run now, rather than only after installing, and waits for the socket rather than trusting the unit's state.
 
+**After building the sandbox, n8n crash-loops on `Could not establish database connection within the configured timeout of 20,000 ms`.**
+The platform is paused. You almost certainly ran `ai-pause` to free memory for the VM, and applying the n8n manifest set n8n's replica count back to 1 — starting it alone, into a namespace where Postgres is still at zero. The message is about a timeout and says nothing about pausing, which is what makes it slow to recognise.
+
+```sh
+kubectl -n platform get deploy
+ai-resume
+kubectl -n platform rollout restart deploy/n8n
+```
+
+`kubectl get deploy` is the quick confirmation: a paused platform shows `0/0` across the namespace. The script now checks Postgres before touching n8n and stops with an explanation instead.
+
 **n8n cannot reach the sandbox although the VM is running.**
 `./10-sandbox.sh --status` compares the VM's current address against the one in the EndpointSlice and says so if they differ. A guest that was rebuilt, or simply rebooted, can come back on a new address, and nothing in the cluster notices: the Service still resolves and the EndpointSlice still looks valid. `--apply` rewrites it.
 

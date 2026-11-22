@@ -466,6 +466,19 @@ ok "Cluster name: sandbox.$K8S_NS.svc.cluster.local:$SANDBOX_PORT"
 # ---------------------------------------------------------------------------
 section "Wiring n8n"
 
+# Applying the n8n manifest sets its replica count back to 1, and if the
+# platform is paused that starts n8n alone, into a namespace where Postgres
+# is still scaled to zero. It then crash-loops on a database timeout that
+# says nothing about pausing, so the state is named here instead.
+pg_ready="$(kubectl -n "$K8S_NS" get deploy postgres \
+            -o jsonpath='{.status.readyReplicas}' 2>/dev/null || true)"
+if [[ -z "$pg_ready" || "$pg_ready" == 0 ]]; then
+    warn "Postgres has no ready replicas - the platform looks paused."
+    warn "Run 'ai-resume' first, then re-run this script to wire n8n up."
+    warn "The sandbox itself is built and running; only the n8n wiring is left."
+    exit 0
+fi
+
 apply_manifest "$K8S_DIR/12-n8n.yaml"
 kubectl -n "$K8S_NS" rollout status deploy/n8n --timeout=180s >/dev/null 2>&1 \
     && ok "n8n restarted with the sandbox settings." \
