@@ -151,6 +151,29 @@ The full AI stack is ~199 GB on a 1 TB drive shared with Windows and games. Run 
 
 ## Strata
 
+**"Host '…:8080' is not allowed (DNS rebinding protection)".**
+Seen from n8n's AI Assistant, Open WebUI, or anything else calling through the gateway — usually reported as a *provider* error, which sends you looking at API keys and base URLs:
+
+```
+litellm.APIError: OpenAIException - Host 'strata.platform.svc.cluster.local:8080'
+is not allowed (DNS rebinding protection)
+```
+
+Nothing is misconfigured upstream. Strata checks the `Host` header of every request and rejects names it does not recognise, which is a sensible defence against a web page in your browser being used to reach a service on your loopback. It only knows about `localhost`, and the cluster reaches it through the host bridge in `server/k8s/03-host-models.yaml`, so LiteLLM's request arrives naming the cluster service instead.
+
+The fix is to tell Strata which names it is legitimately reached by. This is in the generated shell environment as of v3:
+
+```bash
+./ubuntu/11-shell-env.sh          # rewrites ~/.config/ai-workstation/env.sh
+exec "$SHELL" -l                  # or just open a new terminal
+echo "$STRATA_ALLOWED_HOSTS"
+strata launch --family qwen36 --model UD-Q4_K_XL --yes --no-tui
+```
+
+It must be set **in the shell that launches Strata** — it is read at startup, so exporting it afterwards changes nothing until the next launch.
+
+Strata's other suggestion, setting an `api_key`, disables the check entirely rather than narrowing it. That is a reasonable thing to want, since Strata has no authentication otherwise, but it is a larger change: the same key has to go into `api_key` for every Strata entry in LiteLLM's `model_list`, in both `server/k8s/11-litellm.yaml` and the chart's `_helpers.tpl`, and those two must stay byte-identical or Argo CD reads the difference as drift.
+
 **The PC freezes for minutes on first start.**
 Normal. Strata loads 35–55 GB into RAM and pins part of it for the GPU. Wait; do not close the window. Subsequent starts are faster but not instant.
 

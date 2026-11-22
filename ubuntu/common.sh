@@ -178,7 +178,7 @@ add_nvidia_repo() {
 # shell, which reads ~/.bashrc instead - so after a reboot `strata` and `hf`
 # were missing from PATH and AI_ROOT was empty, in exactly the window where
 # you would notice and assume the install was broken.
-SHELL_ENV_VERSION=2
+SHELL_ENV_VERSION=3
 SHELL_ENV_FILE="${SHELL_ENV_FILE:-$HOME/.config/ai-workstation/env.sh}"
 
 _write_env_file() {
@@ -214,6 +214,26 @@ export BACKUP_DIR="${BACKUP_DIR:-$SRV_ROOT/backups}"
 
 # k3s writes a root-only kubeconfig; server/02-k3s.sh copies it here.
 export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
+
+# Strata refuses requests whose Host header is not one it expects, as
+# protection against DNS rebinding. It is right to do that, but the cluster
+# reaches Strata through the host bridge in server/k8s/03-host-models.yaml,
+# so LiteLLM arrives with Host: strata.platform.svc.cluster.local and is
+# turned away:
+#
+#   Host 'strata.platform.svc.cluster.local:8080' is not allowed
+#   (DNS rebinding protection)
+#
+# What makes that hard to place is where it surfaces. The failure is
+# reported by whatever is three hops upstream - n8n's assistant, or Open
+# WebUI - as a provider error, so it reads as a broken API key or a
+# misconfigured gateway rather than as the model server declining a name.
+#
+# Listing the names it is legitimately reached by is the narrow fix. The
+# alternative Strata offers is setting an API key, which disables the check
+# altogether; that is a bigger change, since the key then has to be
+# configured in LiteLLM's model list too.
+export STRATA_ALLOWED_HOSTS="${STRATA_ALLOWED_HOSTS:-localhost,127.0.0.1,strata.platform.svc.cluster.local,strata.platform.svc,strata,10.42.0.1}"
 
 # strata, hf and uv install here. The guard matters because ~/.bashrc is
 # re-read by every nested shell and every tmux pane, and an unguarded prepend

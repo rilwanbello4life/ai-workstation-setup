@@ -255,6 +255,12 @@ item_ui() {
         else
             cat <<'EOF'
 
+  If something calling through LiteLLM reports "Host ... is not allowed
+  (DNS rebinding protection)", Strata is refusing the cluster's name for
+  it, not rejecting a key. STRATA_ALLOWED_HOSTS in the generated shell
+  environment covers it, and must be set in the shell that launches
+  Strata. See reference/troubleshooting.md.
+
   Strata has no web interface of its own. Two ways to drive it:
 
       strata launch --preset <name>    the terminal monitor, which is
