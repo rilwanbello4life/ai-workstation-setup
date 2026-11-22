@@ -90,6 +90,16 @@ spec:
                   name: sandbox-credentials
                   key: api-key
                   optional: true
+            # Web search for the Assistant, so it can read current
+            # documentation rather than recalling it. Self-hosted SearXNG
+            # rather than Brave: the Assistant searches for whatever you
+            # are building, and those queries describe the work.
+            #
+            # To switch to Brave later, add INSTANCE_AI_BRAVE_SEARCH_API_KEY
+            # here - the missing N8N_ prefix is deliberate upstream, not a
+            # typo - and it takes priority over this without removing it.
+            - name: N8N_INSTANCE_AI_SEARXNG_URL
+              value: "http://searxng.platform.svc.cluster.local:8080"
             - name: N8N_HOST
               value: "127.0.0.1"
             - name: N8N_PORT

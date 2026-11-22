@@ -1,0 +1,138 @@
+# SearXNG: the web search the n8n Assistant uses to read current documentation
+# instead of relying on what its model remembers.
+#
+# n8n offers two providers. Brave Search is an API key and a third party in
+# the path; SearXNG is a metasearch proxy you run yourself. This is the
+# self-hosted one, for the same reason everything else here is: the Assistant
+# searches for whatever you are working on, and those queries are a fair
+# description of what you are building. Sent to Brave they would be one more
+# account's worth of history somewhere. Through SearXNG they leave as
+# anonymous queries to the upstream engines, with no key tying them together.
+#
+# The cost of that choice is honest: free engines rate-limit, so a long
+# Assistant session can start returning empty results. n8n says as much and
+# recommends Brave for reliability. If you reach that point, set
+# INSTANCE_AI_BRAVE_SEARCH_API_KEY on the n8n deployment - note the missing
+# N8N_ prefix, which is deliberate upstream - and it takes priority over this
+# without any need to remove it.
+#
+# Not exposed outside the cluster. Nothing but n8n has a use for it, and an
+# open search proxy on a network is something other people find.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: searxng-settings
+  namespace: platform
+data:
+  # SearXNG serves HTML only until a format is enabled explicitly, and n8n
+  # talks to it over the JSON API. Without this line every search returns
+  # 403 and the Assistant reports that search is unavailable, which reads
+  # like a connection problem rather than a content-negotiation one.
+  settings.yml: |
+    use_default_settings: true
+    general:
+      instance_name: "r1wc"
+      donation_url: false
+      contact_url: false
+    search:
+      safe_search: 0
+      autocomplete: ""
+      default_lang: "en"
+      formats:
+        - html
+        - json
+    server:
+      bind_address: "0.0.0.0"
+      port: 8080
+      # Replaced at apply time by 03-platform.sh with the value in
+      # /srv/platform/secrets/searxng-secret. SearXNG refuses to start on
+      # the upstream default.
+      secret_key: "PLACEHOLDER_SECRET"
+      limiter: false
+      image_proxy: false
+    ui:
+      static_use_hash: true
+    outgoing:
+      request_timeout: 10.0
+      max_request_timeout: 15.0
+      pool_connections: 20
+      pool_maxsize: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: searxng
+  namespace: platform
+spec:
+  selector:
+    app: searxng
+  ports:
+    - port: 8080
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: searxng
+  namespace: platform
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: searxng
+  template:
+    metadata:
+      labels:
+        app: searxng
+      annotations:
+        # Rolls the pod when the settings change. A ConfigMap mounted as a
+        # volume updates in place without restarting anything, and SearXNG
+        # reads its settings once at startup, so without this a change to
+        # the ConfigMap looks applied and is not.
+        checksum/settings: "replaced-at-apply-time"
+    spec:
+      containers:
+        - name: searxng
+          image: docker.io/searxng/searxng:latest
+          ports:
+            - containerPort: 8080
+          env:
+            - name: SEARXNG_BASE_URL
+              value: "http://searxng.platform.svc.cluster.local:8080/"
+            # Single worker. This serves one Assistant, not a public
+            # instance, and the default sizes itself to the host's CPU
+            # count - 16 here, which is 16 idle processes holding memory
+            # on a machine that is short of it.
+            - name: UWSGI_WORKERS
+              value: "1"
+            - name: UWSGI_THREADS
+              value: "4"
+          volumeMounts:
+            - name: settings
+              mountPath: /etc/searxng/settings.yml
+              subPath: settings.yml
+          resources:
+            requests:
+              memory: 128Mi
+              cpu: 50m
+            limits:
+              memory: 512Mi
+              cpu: "1"
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 60
+            periodSeconds: 30
+      volumes:
+        - name: settings
+          configMap:
+            name: searxng-settings

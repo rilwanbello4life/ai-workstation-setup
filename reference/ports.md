@@ -34,8 +34,11 @@ Open WebUI defaults to **8080**, which collides with Strata, so always start it 
 | **git daemon** | 9418 | `git://` | Host process; serves `/srv/gitops.git` read-only to the cluster |
 | **Postgres** | 5432 | — | ClusterIP only; not forwarded to loopback |
 | **Code sandbox** | 8080 | `http://sandbox.platform.svc.cluster.local:8080` | Inside the `n8n-sandbox` VM, not a pod |
+| **SearXNG** | 8080 | `http://searxng.platform.svc.cluster.local:8080` | Web search for the n8n Assistant; cluster-internal |
 
-The sandbox reuses 8080 without colliding with Strata, because the two are on different machines: Strata binds 8080 on the host, the sandbox binds 8080 inside the guest, and the cluster reaches the guest on its own address. It is deliberately not forwarded to `127.0.0.1` — nothing but n8n has any business calling it, and a loopback forward would put an unauthenticated code-execution API next to Strata's.
+Three things claim 8080 and none of them collide, because only one is on the host. Strata binds 8080 on the workstation itself; the sandbox binds 8080 inside its VM; SearXNG binds 8080 inside a pod. Each has its own address, and a port is only contended when two processes want the same one on the same interface.
+
+Neither the sandbox nor SearXNG is forwarded to `127.0.0.1`, and that is deliberate rather than an oversight. Only n8n calls either of them, and a loopback forward would put an unauthenticated code-execution API and an open search proxy next to Strata's port — both are things that get found and used by whatever else is on the machine.
 
 These run as pods, except the GPU probe and the git daemon, which are host systemd units that the cluster reaches through the cni0 bridge, and the sandbox, which is a VM reached the same way. `platform-forward.service` port-forwards 4000, 4100, 5678, 3000 and 8090 to `127.0.0.1`, which is what keeps them compatible with the `tailscale serve` map below. Postgres is deliberately not forwarded — reach it with `kubectl -n platform exec -it deploy/postgres -- psql`.
 

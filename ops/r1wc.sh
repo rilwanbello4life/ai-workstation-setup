@@ -63,6 +63,7 @@ litellm	platform	LiteLLM gateway	k8s	4000	-
 queue	platform	GPU queue	k8s	4100	-
 argocd	platform	Argo CD (GitOps)	k8s	8090	http://127.0.0.1:8090
 sandbox	platform	Code sandbox (n8n Assistant)	vm	8080	-
+searxng	platform	Web search (n8n Assistant)	k8s	-	-
 tailscale	access	Tailscale VPN	sys	-	-
 forwards	access	Loopback port forwards	sys	-	-
 friends	access	Friends access (keys, limits)	act	-	-
@@ -145,7 +146,7 @@ item_status() {
             if kube_up; then printf 'running'
             elif unit_active k3s.service; then printf 'starting'
             else printf 'stopped'; fi ;;
-        postgres|n8n|openwebui|litellm)
+        postgres|n8n|openwebui|litellm|searxng)
             r="$(deploy_ready "$id")"
             if [[ -n "$r" && "$r" != 0 ]]; then printf 'running'
             elif kube_up; then printf 'stopped'
@@ -229,7 +230,7 @@ item_start() {
         comfyui)   run_it "$SWITCH" comfyui ;;
         voice)     run_it sudo systemctl start voice-server.service ;;
         cluster)   run_it sudo systemctl start k3s.service ;;
-        postgres|n8n|openwebui|litellm)
+        postgres|n8n|openwebui|litellm|searxng)
             run_it kubectl -n "$K8S_NS" scale deploy "$id" --replicas=1 ;;
         queue)     run_it kubectl -n "$K8S_NS" scale deploy gpu-queue --replicas=1 ;;
         argocd)    run_it kubectl -n argocd scale deploy argocd-server --replicas=1 ;;
@@ -256,7 +257,7 @@ item_stop() {
             run_it "$SWITCH" none ;;
         voice)     run_it sudo systemctl stop voice-server.service ;;
         cluster)   run_it sudo systemctl stop k3s.service ;;
-        postgres|n8n|openwebui|litellm)
+        postgres|n8n|openwebui|litellm|searxng)
             run_it kubectl -n "$K8S_NS" scale deploy "$id" --replicas=0 ;;
         queue)     run_it kubectl -n "$K8S_NS" scale deploy gpu-queue --replicas=0 ;;
         argocd)    run_it kubectl -n argocd scale deploy argocd-server --replicas=0 ;;
@@ -742,6 +743,39 @@ Code sandbox - where n8n's Assistant runs the code it writes.
 
   Use that name, not the VM's address - n8n is in the cluster, and the VM
   address changes whenever the guest is rebuilt.
+EOF
+    ;;
+    searxng) cat <<'EOF'
+Web search - how the n8n Assistant reads current documentation.
+
+  Start   r1wc start searxng        (scales the deployment to 1)
+  Stop    r1wc stop searxng
+  Apply   server/03-platform.sh --apply
+  Test    kubectl -n platform exec deploy/n8n -- \
+            wget -qO- 'http://searxng.platform.svc.cluster.local:8080/search?q=test&format=json'
+
+  A metasearch proxy: it forwards your query to Google, Bing, DuckDuckGo
+  and others, strips the identifying parts and returns the results. The
+  Assistant's searches describe whatever you are building, which is why
+  this is self-hosted rather than Brave Search - with Brave those queries
+  would be one more account's history held by someone else.
+
+  The honest cost: free engines rate-limit, so a long Assistant session
+  can start coming back empty. If that becomes a nuisance, get a Brave
+  Search key and add it to the n8n deployment as
+
+      INSTANCE_AI_BRAVE_SEARCH_API_KEY
+
+  with no N8N_ prefix - that is upstream's spelling, not a typo. Brave
+  takes priority over SearXNG, so nothing needs removing.
+
+  Not reachable outside the cluster, and deliberately not forwarded to
+  127.0.0.1. Only n8n has any use for it, and an open search proxy is
+  the kind of thing other people find and use.
+
+  The secret key is at /srv/platform/secrets/searxng-secret. SearXNG
+  refuses to start on the upstream default, so it is generated at apply
+  time and substituted into the settings.
 EOF
     ;;
     friends) cat <<'EOF'

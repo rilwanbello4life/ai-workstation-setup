@@ -289,6 +289,14 @@ n8n is pointed at it through environment variables in the manifest rather than t
 
 **It does not start at boot.** At 32 GB you cannot run the sandbox, the cluster and a Strata pack together, so starting it stays a decision. `r1wc` has it as an ordinary row with start and stop.
 
+### Web search for the Assistant
+
+The Assistant can also read the live web rather than recalling documentation from training, and n8n offers two providers for it. Brave Search is an API key and a third party in the path. SearXNG is a metasearch proxy you run yourself — it forwards the query to Google, Bing, DuckDuckGo and others, strips the identifying parts, and returns the results.
+
+This kit runs SearXNG, in the cluster, applied by `server/03-platform.sh`. The reason is the same one behind the rest of the stack: the Assistant searches for whatever you happen to be building, and that sequence of queries is a fair description of your work. Through Brave it would accumulate under an account somewhere. There is nothing to configure in the n8n UI — the instance URL is set as an environment variable on the deployment.
+
+The cost is real and worth stating: free engines rate-limit, so a long Assistant session can start returning nothing. If that becomes a nuisance, get a Brave key and add it to the n8n deployment as `INSTANCE_AI_BRAVE_SEARCH_API_KEY` — no `N8N_` prefix, which is upstream's spelling rather than a mistake. Brave takes priority, so SearXNG can stay where it is.
+
 ### The thing to back up
 
 `/srv/platform/secrets/n8n-encryption-key` decrypts every credential n8n stores. Lose it and they are all permanently unreadable, with no recovery path — a database restore will not save you. It belongs somewhere off this machine. See [backups.md](backups.md).

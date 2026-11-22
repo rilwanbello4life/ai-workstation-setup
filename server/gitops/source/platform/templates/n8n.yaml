@@ -82,6 +82,10 @@ spec:
                   name: sandbox-credentials
                   key: api-key
                   optional: true
+            # Web search for the Assistant. Self-hosted rather than Brave;
+            # see server/k8s/15-searxng.yaml for the reasoning.
+            - name: N8N_INSTANCE_AI_SEARXNG_URL
+              value: "http://searxng.{{ .Values.namespace }}.svc.cluster.local:8080"
             - name: N8N_HOST
               value: "127.0.0.1"
             - name: N8N_PORT

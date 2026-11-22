@@ -6,10 +6,10 @@ The first four come from one request — *"an orchestration of AI for anything I
 
 | Phase | What | New files | Port |
 |---|---|---|---|
-| 23 | MCP gateway — Gmail, Drive, Calendar and the rest as agent tools | `server/11-mcp.sh`, `server/k8s/15-mcp.yaml` | 4200 |
+| 23 | MCP gateway — Gmail, Drive, Calendar and the rest as agent tools | `server/11-mcp.sh`, `server/k8s/16-mcp.yaml` | 4200 |
 | 24 | Dictation front door — speak at the system, it decides what to do | `server/12-dictation.sh`, `server/dictation/router.py` | 4300 |
 | 25 | Workflow author — an agent that writes n8n workflows | extends `server/04-agents.sh` | — |
-| 26 | Dashboard — one page showing everything above | `server/13-dashboard.sh`, `server/k8s/16-dashboard.yaml` | 4400 |
+| 26 | Dashboard — one page showing everything above | `server/13-dashboard.sh`, `server/k8s/17-dashboard.yaml` | 4400 |
 | 27 | Medic — an agent that diagnoses this machine, read-only | `server/14-medic.sh` | — |
 
 Ports 4200, 4300 and 4400 are reserved in [ports.md](ports.md) so nothing else takes them in the meantime. They continue the 4xxx platform-service block that LiteLLM (4000) and the GPU queue (4100) started.

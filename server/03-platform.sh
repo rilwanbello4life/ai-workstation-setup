@@ -115,6 +115,30 @@ wait_for_deploy litellm "$K8S_NS" 900 || \
     warn "LiteLLM is not ready. It may still be running database migrations."
 
 # ---------------------------------------------------------------------------
+section "Web search for the n8n Assistant"
+
+# Before n8n, so the Service exists by the time n8n looks for it.
+#
+# The secret key is substituted rather than mounted: SearXNG reads it from
+# settings.yml and has no environment override for it, and it refuses to
+# start on the upstream default. Rendering to a temporary file keeps the
+# generated value out of the repository, and the pod template is annotated
+# with its hash so a changed key actually restarts the pod - a ConfigMap
+# mounted as a volume updates in place, and SearXNG reads settings once.
+SEARX_SECRET="$(secret_file "$SECRETS/searxng-secret" 32)"
+searx_tmp="$(mktemp)"
+trap 'rm -f "$searx_tmp"' EXIT
+sed -e "s|PLACEHOLDER_SECRET|$SEARX_SECRET|" \
+    -e "s|replaced-at-apply-time|$(printf '%s' "$SEARX_SECRET" | sha256sum | cut -c1-16)|" \
+    "$K8S_DIR/15-searxng.yaml" > "$searx_tmp"
+kubectl apply -f "$searx_tmp" >/dev/null || die "Could not apply SearXNG."
+rm -f "$searx_tmp"
+ok "SearXNG applied."
+
+wait_for_deploy searxng "$K8S_NS" 240 || \
+    warn "SearXNG is not ready. The Assistant works without it, minus web search."
+
+# ---------------------------------------------------------------------------
 section "n8n"
 
 apply_manifest "$K8S_DIR/12-n8n.yaml"

@@ -139,6 +139,7 @@ The binaries themselves contain no absolute paths; it is only CMake's *configura
 │       ├── minecraft-rcon-password
 │       ├── valheim-password
 │       ├── argocd-admin-password
+│       ├── searxng-secret                     SearXNG will not start without one
 │       ├── sandbox-api-key                    what n8n sends to the code sandbox
 │       ├── sandbox-registration-token
 │       └── sandbox-runner-api-key
