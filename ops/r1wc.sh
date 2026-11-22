@@ -66,6 +66,7 @@ tailscale	access	Tailscale VPN	sys	-	-
 forwards	access	Loopback port forwards	sys	-	-
 friends	access	Friends access (keys, limits)	act	-	-
 games	games	Game servers	act	-	-
+secrets	maintain	Passwords, keys and accounts	act	-	-
 pause	maintain	Pause the cluster (~15 GB)	act	-	-
 backup	maintain	Backup now	act	-	-
 boot	maintain	Whole machine up / down	act	-	-
@@ -417,6 +418,15 @@ Postgres - shared state for LiteLLM, n8n and the agent prompt store.
   Not forwarded to loopback - reach it through kubectl exec. Data lives on
   the host at /srv/platform/postgres and is backed up nightly.
 
+  The superuser password was generated at install; you did not miss a
+  step. 'psql -U postgres' from inside the pod needs no password at all,
+  which is why the shell command above just works.
+
+      sudo cat /srv/platform/secrets/postgres-password
+
+  You need it when adding the Postgres credential inside n8n, and nowhere
+  else day to day. To change it, see 'r1wc docs secrets'.
+
   One database server with three logical databases rather than three
   servers: at ~2 GB resident it is already a real slice of the memory
   budget, and three would cost triple for no isolation on a single node.
@@ -433,6 +443,10 @@ n8n - the workflow editor. This is where the agent loop is wired together.
   Start   kubectl -n platform scale deploy n8n --replicas=1
   Stop    kubectl -n platform scale deploy n8n --replicas=0
   Logs    kubectl -n platform logs deploy/n8n -f
+
+  There is no password to look up. The FIRST person to open it creates
+  the owner account, so claim it before anything else can. It is bound to
+  loopback and Tailscale, so that is your own devices, not the internet.
 
   Starter workflows were written to /srv/platform/n8n-workflows. Import
   them with Workflows > Import from file. Read them before activating -
@@ -459,6 +473,17 @@ Open WebUI - a chat interface in front of the local models.
 
   It defaults to port 8080 upstream, which collides with Strata, so it is
   always run on 3000 here. If you ever deploy it yourself, keep that.
+
+  There is no password to look up. The FIRST account created becomes the
+  administrator, so until you open it and register, anyone who can reach
+  3000 can claim it. It is bound to loopback and Tailscale, so that means
+  your own devices rather than the internet - but claim it now anyway.
+
+  Connect it to the gateway: Settings > Connections > OpenAI API,
+  base URL http://litellm.platform.svc.cluster.local:4000/v1, and a key
+  from 'sudo cat /srv/platform/secrets/litellm-master-key' with sk- in
+  front. The models brain, worker, checker, strata and local then appear
+  in the model picker.
 EOF
     ;;
     litellm) cat <<'EOF'
@@ -476,6 +501,21 @@ LiteLLM - the API gateway. One OpenAI-compatible endpoint, real keys.
 
   Ports 4000 and 4100 are the only two here with authentication, which is
   what makes them the only two safe to share. See reference/ports.md.
+
+  The master key is the gateway admin - it can mint and revoke every other
+  key, so use it for administration and give nobody else a copy:
+
+      sudo cat /srv/platform/secrets/litellm-master-key
+
+      curl http://127.0.0.1:4000/v1/models \
+        -H "Authorization: Bearer sk-PASTE-THE-KEY-HERE"
+
+  Note the sk- prefix: the file holds the key without it. The admin
+  interface is at http://127.0.0.1:4000/ui, same key as the password.
+
+  For anyone else, issue a scoped key with 'friends' rather than sharing
+  this one. Those carry their own budget and rate limit and can be
+  revoked individually.
 EOF
     ;;
     queue) cat <<'EOF'
@@ -508,9 +548,21 @@ Argo CD - GitOps. What is in the repository is what runs.
   Do not kubectl apply by hand into namespaces Argo manages - it will
   revert you, which is the point, but it is confusing the first time.
 
-  Admin password:
+  Log in as user 'admin'. 08-gitops.sh copies the generated password into
+  the secrets directory with everything else:
+
+      sudo cat /srv/platform/secrets/argocd-admin-password
+
+  If that file is missing, read it from the Secret Argo CD generated:
+
       kubectl -n argocd get secret argocd-initial-admin-secret \
         -o jsonpath='{.data.password}' | base64 -d; echo
+
+  Argo CD treats that Secret as disposable and expects you to set your own
+  password and delete it. Do change it - then write the new one to
+  /srv/platform/secrets/argocd-admin-password so the backup has it:
+
+      argocd account update-password
 
   Full notes: reference/troubleshooting.md, the GitOps section.
 EOF
@@ -580,6 +632,107 @@ Game servers - Minecraft and Valheim.
   drop it from IQ2_XS to Q2_0. Run one unless the model is paused.
 
   Worlds live in /srv/games and are backed up nightly.
+EOF
+    ;;
+    secrets) cat <<'EOF'
+Passwords, keys and accounts - everything that controls access here.
+
+  Nothing below needs choosing. Every password on this machine was
+  generated at install time into /srv/platform/secrets, mode 600, owned by
+  root. There is no step you skipped. Read one with:
+
+      sudo cat /srv/platform/secrets/postgres-password
+
+  THE FILES
+
+      postgres-password         the postgres superuser. All three
+                                databases, full rights.
+      n8n-db-password           n8n's own database login
+      n8n-encryption-key        decrypts every credential n8n stores
+      litellm-master-key        gateway admin; mints and revokes keys
+      litellm-salt-key          hashes the keys LiteLLM issues
+      openwebui-secret-key      signs Open WebUI session cookies
+      argocd-admin-password     the Argo CD web interface
+      restic-password           decrypts the backups themselves
+      backup.env                offsite credentials; empty until set
+      minecraft-rcon-password   Minecraft remote console
+      valheim-password          the join password for the server
+
+  TWO OF THOSE ARE IRREPLACEABLE
+
+  n8n-encryption-key and restic-password are not passwords you can reset.
+  They are keys that decrypt data you already have.
+
+      Lose n8n-encryption-key   every credential n8n holds becomes
+                                permanently unreadable. Restoring the
+                                database does not help - the rows are
+                                ciphertext and the key is gone.
+      Lose restic-password      the backups still exist and can never be
+                                read again.
+
+  restic-password lives inside the backup it protects, so a copy on this
+  machine alone is not a copy. Put both somewhere off this machine - a
+  password manager is fine. Do it before you need it:
+
+      sudo cat /srv/platform/secrets/n8n-encryption-key
+      sudo cat /srv/platform/secrets/restic-password
+
+  ACCOUNTS THAT ARE NOT PASSWORDS
+
+  Three services do not read a file - they wait for someone to claim them,
+  and the FIRST person to open the page becomes the administrator. Until
+  you claim them, anyone who can reach the port can.
+
+      n8n          http://127.0.0.1:5678   creates the owner account
+      Open WebUI   http://127.0.0.1:3000   first account becomes admin
+      Argo CD      http://127.0.0.1:8090   user 'admin', password in
+                                           argocd-admin-password
+
+  Both n8n and Open WebUI are bound to loopback and reachable over
+  Tailscale, so the exposure is to your own devices rather than the
+  internet. That is a reason not to panic, not a reason to leave them.
+  Claim all three now:
+
+      r1wc ui n8n
+      r1wc ui openwebui
+      r1wc ui argocd
+
+  Argo CD's generated password should be changed once you are in - its own
+  documentation treats argocd-initial-admin-secret as disposable, so do not
+  leave it as the only copy:
+
+      argocd account update-password
+
+  Then update the stored copy so the two do not drift:
+
+      sudo tee /srv/platform/secrets/argocd-admin-password
+
+  WHAT IS NOT PROTECTED BY ANY OF THIS
+
+  Strata on 8080, llama.cpp on 8081, ComfyUI on 8188 and the voice server
+  on 8100 have no authentication at all. They are bound to loopback for
+  exactly that reason. Only LiteLLM on 4000 and the queue on 4100 check a
+  key, which is why they are the only two safe to let anyone else reach.
+  See reference/ports.md.
+
+  CHANGING A PASSWORD
+
+  Editing the file is not enough - the running service already has the old
+  one. Postgres, as the worked example:
+
+      sudo tee /srv/platform/secrets/postgres-password
+      kubectl -n platform exec -it deploy/postgres -- \
+        psql -U postgres -c "ALTER USER postgres PASSWORD 'the-new-one';"
+      ./server/03-platform.sh
+
+  The script re-reads the files, rewrites the Kubernetes Secrets and
+  restarts what depends on them. Re-running it never regenerates an
+  existing password - secret_file only writes when the file is absent -
+  so it is safe at any time.
+
+  For a LiteLLM key belonging to someone else, revoke rather than rotate:
+
+      friends revoke <name>
 EOF
     ;;
     pause) cat <<'EOF'

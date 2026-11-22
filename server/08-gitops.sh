@@ -300,6 +300,25 @@ kubectl -n "$ARGO_NS" rollout status statefulset/argocd-application-controller \
 ADMIN_PW="$(kubectl -n "$ARGO_NS" get secret argocd-initial-admin-secret \
             -o jsonpath='{.data.password}' 2>/dev/null | base64 -d 2>/dev/null || true)"
 
+# Copy it next to every other credential on this machine.
+#
+# Argo CD generates this into a Secret named argocd-initial-admin-secret and
+# considers it disposable - the documented flow is that you log in, set your
+# own password, and delete it. If you never do, one 'kubectl delete secret'
+# or a reinstall takes the only copy of the only password with it.
+#
+# Keeping it in $SECRETS also means the nightly backup captures it; a
+# Kubernetes Secret in argocd is not in the backup set, and would not help
+# anyway in the case where you are rebuilding the cluster.
+if [[ -n "$ADMIN_PW" && ! -f "$SECRETS/argocd-admin-password" ]]; then
+    sudo mkdir -p "$SECRETS"
+    printf '%s\n' "$ADMIN_PW" | sudo tee "$SECRETS/argocd-admin-password" >/dev/null
+    sudo chmod 600 "$SECRETS/argocd-admin-password"
+    ok "Admin password saved to $SECRETS/argocd-admin-password"
+elif [[ -f "$SECRETS/argocd-admin-password" ]]; then
+    ok "Admin password already stored at $SECRETS/argocd-admin-password"
+fi
+
 # ---------------------------------------------------------------------------
 section "Loopback access"
 
