@@ -8,6 +8,7 @@
 #   ./10-sandbox.sh --shell    a root-capable shell inside the guest
 #   ./10-sandbox.sh --logs     follow the sandbox container logs
 #   ./10-sandbox.sh --restart  restart the containers, keep the VM
+#   ./10-sandbox.sh --password set a login password for the guest
 #   ./10-sandbox.sh --destroy  remove the VM and the cluster bridge
 #
 # Re-running --apply is safe and is the intended way to repair a half-built
@@ -80,7 +81,8 @@ while [[ $# -gt 0 ]]; do
         --shell)   ACTION=shell; shift ;;
         --logs)    ACTION=logs; shift ;;
         --restart) ACTION=restart; shift ;;
-        -h|--help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        --password) ACTION=password; shift ;;
+        -h|--help) sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) die "Unknown option: $1" ;;
     esac
 done
@@ -117,7 +119,24 @@ case "$ACTION" in
     shell)
         need_vm
         echo "Entering $VM_NAME. The service lives in $SANDBOX_DIR. 'exit' to leave."
+        echo "sudo needs no password here. If something prompts for one, it asked"
+        echo "for a tty - Ctrl-C and run it as 'sudo <command>' instead, or set a"
+        echo "password with ./10-sandbox.sh --password."
         exec multipass shell "$VM_NAME" ;;
+    password)
+        # The guest has no user password at all: multipass authenticates with
+        # its own key and grants the ubuntu user passwordless sudo. That is
+        # fine until something inside the guest asks for one interactively,
+        # at which point there is nothing to type and no way to find out.
+        need_vm
+        read -rsp "New password for ubuntu@$VM_NAME: " p1; echo
+        read -rsp "Again: " p2; echo
+        [[ "$p1" == "$p2" && -n "$p1" ]] || die "Passwords did not match."
+        printf 'ubuntu:%s' "$p1" |
+            multipass exec "$VM_NAME" -- sudo chpasswd \
+            || die "Could not set the password."
+        ok "Password set. It is yours to remember; nothing stores it."
+        exit 0 ;;
     logs)
         need_vm
         exec multipass exec "$VM_NAME" -- \
@@ -156,8 +175,10 @@ if have multipass && vm_exists; then
     # thing people worry about after a failed run is a second copy quietly
     # holding 6 GB, and multipass is the only honest witness to that.
     others="$(multipass list --format csv 2>/dev/null |
-              awk -F, -v me="$VM_NAME" 'NR>1 && $1!=me && $1 ~ /sandbox/ {print $1}')"
-    [[ -n "$others" ]] && warn "Other sandbox-like VMs exist: $(tr '\n' ' ' <<<"$others")"
+              awk -F, -v me="$VM_NAME" 'NR>1 && $1!=me && $1 ~ /sandbox/ {print $1}' || true)"
+    if [[ -n "$others" ]]; then
+        warn "Other sandbox-like VMs exist: $(tr '\n' ' ' <<<"$others")"
+    fi
 
     if vm_running; then
         ok "VM $VM_NAME running at ${ip:-unknown}, ${VM_CPUS} CPUs, ${VM_MEM} RAM"
@@ -166,9 +187,13 @@ if have multipass && vm_exists; then
         else
             warn "VM is up but the API is not answering. --logs to see why."
         fi
-        running="$(compose "ps --services --filter status=running" 2>/dev/null | tr '\n' ' ')"
-        [[ -n "${running// }" ]] && info "Containers: ${running% }" \
-                                 || warn "No containers running. --restart, or --apply to rebuild."
+        running="$(compose "ps --services --filter status=running" 2>/dev/null |
+                   tr '\n' ' ' || true)"
+        if [[ -n "${running// }" ]]; then
+            info "Containers: ${running% }"
+        else
+            warn "No containers running. --apply builds them."
+        fi
     else
         warn "VM $VM_NAME exists but is stopped. 'multipass start $VM_NAME'"
     fi

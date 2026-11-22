@@ -580,7 +580,12 @@ That last line is the real test; it must mention `sysbox-runc`. `./10-sandbox.sh
 No. The VM is addressed by name, so a re-run starts the existing one instead of launching another, and the containers are one named compose project. `multipass list` is the direct check, and `--status` warns if it sees any other VM with `sandbox` in its name.
 
 **The VM is up but the API does not answer.**
-`./10-sandbox.sh --logs`. Usually an image still pulling. `--restart` recreates the containers without rebuilding the guest.
+First check whether the service was ever installed: `./10-sandbox.sh --status` lists the running containers, and if there are none, the previous `--apply` stopped before reaching them. Re-run `--apply`. If the containers are there, `--logs` — usually an image still pulling — and `--restart` recreates them without rebuilding the guest.
+
+**Something inside the guest asks for the ubuntu password.**
+There isn't one, and nothing is hiding it. multipass authenticates with its own key and grants the `ubuntu` user passwordless sudo, so no password was ever generated. A prompt means the program wanted a terminal rather than a credential — run it as `sudo <command>` directly. If you want a real password, `./10-sandbox.sh --password` sets one.
+
+Also: there is no need to run anything in the guest by hand. `./10-sandbox.sh --apply` does every step non-interactively and is safe to re-run.
 
 **Reclaiming the memory.**
 `multipass stop n8n-sandbox` gives back 6 GB. Nothing else breaks — n8n starts without the sandbox, and only the Assistant's code execution stops working.

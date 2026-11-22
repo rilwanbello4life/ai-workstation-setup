@@ -697,6 +697,14 @@ Code sandbox - where n8n's Assistant runs the code it writes.
   rarely a reason to - the service lives in /home/ubuntu/sandbox and the
   shell above is already root-capable through sudo.
 
+  There is no password for the ubuntu user, and nothing is hiding one.
+  multipass authenticates with its own key and grants passwordless sudo,
+  so no password was ever generated. If something inside the guest asks
+  for one anyway, it wanted a terminal rather than a credential - run it
+  as 'sudo <command>' instead. To set one for real:
+
+      server/10-sandbox.sh --password
+
   This is the only part of the stack that exists to run code a model wrote
   rather than code you chose, which is why it lives in a virtual machine
   instead of a pod.
