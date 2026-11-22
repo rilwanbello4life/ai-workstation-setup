@@ -64,6 +64,32 @@ spec:
                 secretKeyRef:
                   name: n8n-credentials
                   key: encryption-key
+            # The code sandbox for the Assistant and Agents. Configured here
+            # rather than through the settings page so it survives a pod
+            # restart and is visible in the repository.
+            #
+            # These are harmless when the sandbox is not built: n8n reports
+            # the Assistant's code features as unavailable rather than
+            # failing to start. The Secret below is optional for the same
+            # reason - server/10-sandbox.sh creates it, and marking it
+            # optional means n8n still boots on a machine that never ran
+            # that script.
+            #
+            # 'sandbox' resolves through the Service in 14-sandbox-bridge.yaml,
+            # which points at a VM rather than a pod. See 10-sandbox.sh for
+            # why it is a VM and not a Sysbox node pool.
+            - name: N8N_INSTANCE_AI_SANDBOX_ENABLED
+              value: "true"
+            - name: N8N_INSTANCE_AI_SANDBOX_PROVIDER
+              value: "n8n-sandbox"
+            - name: N8N_SANDBOX_SERVICE_URL
+              value: "http://sandbox.platform.svc.cluster.local:8080"
+            - name: N8N_SANDBOX_SERVICE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: sandbox-credentials
+                  key: api-key
+                  optional: true
             - name: N8N_HOST
               value: "127.0.0.1"
             - name: N8N_PORT

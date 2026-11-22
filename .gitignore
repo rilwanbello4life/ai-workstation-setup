@@ -25,3 +25,8 @@ venv/
 *secret*.yaml
 *credentials*.json
 kubeconfig
+
+# Written by server/10-sandbox.sh with the sandbox VM's address baked in.
+# Not a secret, but it describes one machine and would be wrong everywhere
+# else - re-run that script rather than carrying it between installs.
+server/k8s/14-sandbox-bridge.yaml

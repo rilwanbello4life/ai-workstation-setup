@@ -62,6 +62,7 @@ openwebui	platform	Open WebUI (chat)	k8s	3000	http://127.0.0.1:3000
 litellm	platform	LiteLLM gateway	k8s	4000	-
 queue	platform	GPU queue	k8s	4100	-
 argocd	platform	Argo CD (GitOps)	k8s	8090	http://127.0.0.1:8090
+sandbox	platform	Code sandbox (n8n Assistant)	vm	8080	-
 tailscale	access	Tailscale VPN	sys	-	-
 forwards	access	Loopback port forwards	sys	-	-
 friends	access	Friends access (keys, limits)	act	-	-
@@ -165,6 +166,15 @@ item_status() {
         forwards)
             if unit_active platform-forward.service; then printf 'running'
             else printf 'stopped'; fi ;;
+        sandbox)
+            # A VM, not a unit and not a pod. 'not built' and 'stopped' are
+            # different answers worth distinguishing: the first needs
+            # 10-sandbox.sh --apply, the second needs multipass start.
+            if ! have multipass; then printf -- '-'
+            elif ! multipass info n8n-sandbox >/dev/null 2>&1; then printf 'not built'
+            elif multipass info n8n-sandbox --format csv 2>/dev/null |
+                 awk -F, 'NR==2{exit $2!="Running"}'; then printf 'running'
+            else printf 'stopped'; fi ;;
         pause)
             # ai-pause records what it scaled down; the directory existing
             # and being non-empty is what "currently paused" means.
@@ -211,6 +221,7 @@ item_start() {
         argocd)    run_it kubectl -n argocd scale deploy argocd-server --replicas=1 ;;
         tailscale) run_it sudo tailscale up ;;
         forwards)  run_it sudo systemctl start platform-forward.service ;;
+        sandbox)   run_it multipass start n8n-sandbox ;;
         friends)   run_it friends ;;
         games)     run_it games ;;
         pause)     run_it ai-resume ;;
@@ -237,6 +248,7 @@ item_stop() {
         argocd)    run_it kubectl -n argocd scale deploy argocd-server --replicas=0 ;;
         tailscale) run_it sudo tailscale down ;;
         forwards)  run_it sudo systemctl stop platform-forward.service ;;
+        sandbox)   run_it multipass stop n8n-sandbox ;;
         pause)     run_it ai-pause --cluster ;;
         boot)      run_it "$HERE/down.sh" ;;
         games)     run_it games stop ;;
@@ -635,6 +647,45 @@ Loopback port forwards - what makes the cluster's services reachable.
   down, and is the first thing to check when a UI will not open.
 
   Postgres is deliberately not forwarded.
+EOF
+    ;;
+    sandbox) cat <<'EOF'
+Code sandbox - where n8n's Assistant runs the code it writes.
+
+  Build   server/10-sandbox.sh --apply
+  Start   multipass start n8n-sandbox      costs 6 GB of RAM
+  Stop    multipass stop n8n-sandbox       gives it back
+  Shell   multipass shell n8n-sandbox
+  Check   server/10-sandbox.sh --status
+  Remove  server/10-sandbox.sh --destroy
+
+  This is the only part of the stack that exists to run code a model wrote
+  rather than code you chose, which is why it lives in a virtual machine
+  instead of a pod.
+
+  n8n recommends Sysbox runners on a dedicated Kubernetes node pool. That
+  is not available here: Sysbox supports Ubuntu up to 24.04 and this is
+  26.04, k3s is not among the distributions it is tested on, and its
+  installer can replace containerd with CRI-O and restart the kubelet -
+  which on a single node means Postgres, LiteLLM and Argo CD all at once.
+
+  The VM is the better answer rather than the fallback. Code runs in a
+  Sysbox container inside an Ubuntu 24.04 guest, so an escape reaches a
+  disposable image holding nothing but this service. It never reaches
+  /srv, the secrets, the models or the GPU.
+
+  It does NOT start at boot. At 32 GB you cannot have the sandbox, the
+  cluster and a Strata pack at the same time, so starting it is a decision
+  you make when you want the Assistant to write code.
+
+  n8n finds it through environment variables, so there is normally nothing
+  to type. If it asks:
+
+      Service URL   http://sandbox.platform.svc.cluster.local:8080
+      API key       sudo cat /srv/platform/secrets/sandbox-api-key
+
+  Use that name, not the VM's address - n8n is in the cluster, and the VM
+  address changes whenever the guest is rebuilt.
 EOF
     ;;
     friends) cat <<'EOF'

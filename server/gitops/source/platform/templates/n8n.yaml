@@ -66,6 +66,22 @@ spec:
                 secretKeyRef:
                   name: n8n-credentials
                   key: encryption-key
+            # Code sandbox for the Assistant and Agents. Must stay in step
+            # with server/k8s/12-n8n.yaml. The Secret is optional so n8n
+            # still starts on a machine where server/10-sandbox.sh has
+            # never been run.
+            - name: N8N_INSTANCE_AI_SANDBOX_ENABLED
+              value: "true"
+            - name: N8N_INSTANCE_AI_SANDBOX_PROVIDER
+              value: "n8n-sandbox"
+            - name: N8N_SANDBOX_SERVICE_URL
+              value: "http://sandbox.{{ .Values.namespace }}.svc.cluster.local:8080"
+            - name: N8N_SANDBOX_SERVICE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: sandbox-credentials
+                  key: api-key
+                  optional: true
             - name: N8N_HOST
               value: "127.0.0.1"
             - name: N8N_PORT
