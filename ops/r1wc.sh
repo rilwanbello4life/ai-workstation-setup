@@ -584,6 +584,22 @@ Tailscale - how this machine is reachable from anywhere, privately.
   internet - this kit never uses funnel, and neither should you here,
   because almost nothing in the stack has authentication.
 
+  Check which you have. These are not alternatives to each other: serve
+  is what makes you reachable remotely, funnel is what makes you
+  reachable publicly, and turning funnel off costs you nothing.
+
+      tailscale serve status       expect :8447 -> 127.0.0.1:4000
+      tailscale funnel status      expect nothing
+      sudo tailscale funnel off    if it says otherwise
+
+  They share one configuration, so 'funnel off' can take the serve
+  mapping with it. Put it back by re-running server/06-friends.sh.
+
+  To limit who on the tailnet can reach what, and how to narrow the
+  firewall from "any port on tailscale0" to just the gateway, see the
+  lock-down section of reference/remote-access.md. It has a policy you
+  can paste into the admin console.
+
   Full notes: reference/remote-access.md
 EOF
     ;;

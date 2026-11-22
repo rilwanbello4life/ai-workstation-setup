@@ -159,6 +159,67 @@ Clients then send `Authorization: Bearer <key>`. ComfyUI has no equivalent, whic
 
 **Lock down the tailnet with ACLs.** By default a tailnet with no `acls` section allows everything between your devices, which is usually fine for a personal setup. If you share the tailnet with anyone, restrict it — ACLs are deny-by-default once defined. See [Tailscale's ACL documentation](https://tailscale.com/docs/features/access-control/acls).
 
+### A policy that keeps remote access and removes the risk
+
+Three independent layers, each of which works on its own. Ordered by how much they buy for the effort.
+
+**1. Use `serve`, never `funnel`.** This is the whole difference between private and public, and it is one word:
+
+| | Reachable by | Needs |
+|---|---|---|
+| `tailscale serve` | your tailnet only | Tailscale installed and logged in |
+| `tailscale funnel` | **the entire internet** | a browser |
+
+Turning Funnel off does not reduce your remote access at all, because `serve` is what makes the endpoint reachable from your phone and laptop. Check which you have:
+
+```bash
+tailscale serve status      # should list :8447
+tailscale funnel status     # should say no funnel
+```
+
+If `funnel off` also clears the serve mapping — they share one config — put it back with `server/06-friends.sh`.
+
+**2. Restrict who on the tailnet can reach what.** Paste this into **Access controls** in the Tailscale admin console. It tags this machine as a server, lets your own devices reach everything, and lets anyone you have shared the tailnet with reach *only* the authenticated gateway on 8447:
+
+```jsonc
+{
+  "tagOwners": { "tag:workstation": ["autogroup:admin"] },
+  "acls": [
+    // Your own devices: full access to the workstation.
+    { "action": "accept", "src": ["autogroup:member"],
+      "dst": ["tag:workstation:*"] },
+
+    // Guests: the gateway and nothing else. 8447 is the only port that
+    // checks an API key, which is what makes it the only one safe to
+    // offer. ComfyUI on 8188 would be arbitrary code execution.
+    { "action": "accept", "src": ["autogroup:shared"],
+      "dst": ["tag:workstation:8447"] }
+  ],
+  "ssh": []
+}
+```
+
+Then tag the machine, which also stops its key expiring every 180 days and silently dropping you:
+
+```bash
+sudo tailscale up --advertise-tags=tag:workstation
+```
+
+ACLs are deny-by-default once the section exists, so anything not listed is refused. Test a rule before relying on it — the admin console has a preview, and `tailscale ping <device>` tells you whether a path is permitted.
+
+**3. Tighten the host firewall.** `01-server-base.sh` sets `ufw allow in on tailscale0`, which permits every port to every tailnet device. That is deliberately permissive so the first setup works. Narrowing it is a one-liner per port, and it is the layer that still protects you if an ACL is edited wrongly:
+
+```bash
+sudo ufw delete allow in on tailscale0
+sudo ufw allow in on tailscale0 to any port 8447 proto tcp   # gateway
+sudo ufw allow in on tailscale0 to any port 22   proto tcp   # ssh, if used
+sudo ufw status verbose
+```
+
+Do this **last and from a local session**, not over SSH — if you get it wrong you have locked yourself out of the machine you are editing it on.
+
+Worth being clear about what the firewall cannot do here: the loopback forwards bind to `127.0.0.1`, so `ufw` never sees that traffic. Reaching n8n or Open WebUI remotely needs `tailscale serve` to publish them, and publishing an unauthenticated service to the tailnet is a decision to make deliberately rather than by default.
+
 **Think twice about ComfyUI.** Even on a private tailnet it is the one service that can run arbitrary code. If you do not need it remotely, leave `--https=8443` unpublished.
 
 ## Things that will catch you out
