@@ -126,46 +126,93 @@ The budget, measured rather than nominal. `free -h` reports **89 GiB** usable. T
 
 Those are 4 GB tighter than the figures in the tier tables, which assumed 93 GiB. Treat anything within 5 GB of the limit as needing a measurement rather than an assumption.
 
-### Keep these five
+### Where the packs actually live
 
-| Pack | Experts | When | What it is for |
-|---|---:|---|---|
-| **`unsloth/UD-IQ4_XS`** | 62 GB | cluster up, 2 GB margin | The best quality that runs day to day. 88.9% top-1. |
-| **`qwen/IQ3_S`** | 50 GB | cluster up, comfortable | The one to default to. 87.7% top-1 for 12 GB less, with room to breathe. |
-| **`coder/IQ1_M`** | 23 GB | always | The coding instrument. Low precision is not a compromise here — it is a different model, fine-tuned for one job. |
-| **`qwen36/Q8_0`** | ~10 GB | always | Small, fast, Apache 2.0, accepts video. The one to use when the 125B is overkill, and the only one you can run beside something else. |
-| **`nvfp4/NVFP4`** | 70 GB | after `ai-pause`, 9 GB margin | The only pack built for your card's FP4 tensor cores. Worth owning for the hardware match alone. |
+Two directories, which matters before deleting anything.
 
-That is roughly **387 GB on disk** and covers every situation this machine encounters: a quality ceiling, a comfortable default, a coder, a lightweight general model, and the hardware-native option.
+```
+~/Documents/Strata/
+├── models -> Models        a symlink; du reports it as 0 bytes
+├── Models/                 490 GB - the large packs
+├── packs/                   86 GB - tokenizers and pack metadata
+├── mtp/                    6.5 GB - MTP draft layers, shared
+└── dflash2/                823 MB
+```
 
-**`unsloth/UD-Q4_K_XL` is the sixth**, if disk allows. At 93.1% top-1 it is the best-scoring pack you can execute at all, and 78 GB of experts against ~79 GB available after pausing is a 1 GB margin — which is to say it will sometimes work and sometimes not, depending on what else the kernel is holding. Keep it if you want the ceiling and accept that reaching it is an event rather than a default.
+`~/.local/share/strata/Strata-data/` is the other one, and it is where the launch config pointed when `qwen36-UD-Q4_K_XL` was serving. **A pack reported `present` by `strata models list` may have its weights in either place.** Use `strata models explain <name>` before deleting anything — it prints where Strata looks and what it finds, and changes nothing.
 
-### Delete these — bigger packs already do the job
+There is **no remove verb**. `strata models` offers `list, inspect, explain, import, move` and nothing else, so removal is `rm -rf` on directories you have confirmed with `explain`.
 
-| Pack | On disk | Superseded by |
+### Keep these six — the ones I am confident run here
+
+Sizes below are **measured on this machine** with `du -sh`, not catalogue download figures — they include the MTP draft layer and the picture reader, so they run larger than the download column in the tier tables.
+
+| Pack | Params | On disk | Experts in RAM | Top-1 vs Q8_0 | Runs | What to expect |
+|---|---|---:|---:|---:|---|---|
+| **`unsloth/UD-Q4_K_XL`** | 125B / 6B active | 104 GB | 78 GB | **93.1%** | after `ai-pause`, 1 GB margin | The quality ceiling of anything you can execute. The margin is genuinely thin — it will load some days and not others depending on what else the kernel is holding. A deliberate "stop everything and think hard" mode. |
+| **`nvfp4/NVFP4`** | 125B / 6B active | 120 GB | 70 GB | not published | after `ai-pause`, 9 GB margin | The only pack built for your card's FP4 tensor cores. A comfortable margin, unlike the one above, so this is the realistic paused-mode default. |
+| **`unsloth/UD-IQ4_XS`** | 125B / 6B active | 88 GB | 62 GB | 88.9% | cluster up, 2 GB margin | The best quality that runs while the platform is up. Measure it once before relying on it; 2 GB is inside the noise. |
+| **`qwen/IQ3_S`** | 125B / 6B active | 78 GB | 50 GB | 87.7% | cluster up, comfortable | **The day-to-day default.** 1.2 points behind UD-IQ4_XS for 12 GB less memory and real headroom. ~53 tok/s, slower on four DIMMs. |
+| **`coder/IQ1_M`** | 125B coder fine-tune | ~75 GB | 23 GB | n/a | always | The coding instrument, ~55 tok/s. IQ1 is not a compromise here: it is a different model trained for one job, and deliberately weak outside code and English. |
+| **`qwen36/Q8_0`** | 35B / 3B active | 37 GB | ~10 GB | closest to the full 35B | always | A different base model, not a smaller Flash-Next. Apache 2.0, accepts video, light enough to run beside other work. For when the 125B is overkill. |
+
+Six packs, about **500 GB**: a quality ceiling, a hardware-native option, a working best, a comfortable default, a coder and a lightweight generalist.
+
+**On the margins.** Those figures of 9 GB, 2 GB and 1 GB are the difference between a pack's experts and your available RAM, and they are the numbers on this page most worth distrusting — expert sizes are published approximations, not measurements of your install. A 9 GB margin is safe. A 2 GB margin is probably fine. A 1 GB margin is a coin toss, and the failure mode is the OOM killer choosing a victim somewhere else, usually Postgres.
+
+### Delete these — you own something strictly better
+
+Every pack here is **outclassed by a pack you already have and can run**. That is the only criterion applied: not size, not age, but that something better fits in the same machine.
+
+| Pack | Outclassed by | The argument |
+|---|---|---|
+| `qwen/Q2_0` | `qwen/IQ3_S` | 80.6% top-1 and perplexity 4.475, against IQ3_S's 87.7% and 4.097. **This is the pack below the quality cliff** — everything above it sits within 2% of the reference and Q2_0 jumps about 10%. It bought speed on a machine that could not hold anything larger. Yours can. |
+| `qwen/IQ2_XS` | `qwen/IQ3_S` | It was the recommended default at 64 GB because it was the largest pack that coexisted with the cluster. That constraint is the only reason it was ever the answer, and it is gone — IQ3_S coexists with the cluster now, and scores higher. |
+| `qwen/IQ3_XXS` | `qwen/IQ3_S` | 84.5% against 87.7%, for 7 GB less RAM. Same family, same shape, three points worse. There is no situation on this machine where you would choose it. |
+| `gyro/Gyro-S` | `qwen/IQ3_S` | Gyro-S exists to keep every expert on a machine that cannot hold a decent quantisation — the full-expert fallback. You are no longer that machine, and IQ3_S beats it outright. |
+| `gyro/Gyro-M` | `qwen/IQ3_S` | The largest single win here: ~92 GB for roughly IQ3_XXS quality, which IQ3_S already beats. Its distinguishing feature is using ~20% less GPU memory, which matters when VRAM is the binding constraint. Yours is RAM, so it buys nothing. |
+| `qwen36/UD-Q4_K_XL` | `qwen36/Q8_0` | The same 35B model at lower precision. You hold the 8-bit version — the closest thing to the full model — for 15 GB more disk. Keeping both means keeping a worse copy of something you have. |
+| `qwen36/UD-Q6_K_XL` | `qwen36/Q8_0` | Same argument, smaller gap. Q6 is close to Q8 on this model, but "close to something you already own" is not a reason to hold 33 GB. |
+| `swift/IQ2_XS` | `qwen/IQ3_S`, **with a caveat** | Quality-wise it matches IQ2_XS, which IQ3_S beats, so by the criterion above it goes. But quality was never its argument. Flash-Next thinks at `xhigh` by default and can reason at length before answering; Swift is a fine-tune that thinks much shorter at the same quality. It is the fastest-to-useful-answer model you own, not the best. **Decide on behaviour rather than benchmarks:** if verbose reasoning irritates you in daily use, keep it. If `reasoning_effort` on the API is control enough, take back the 64 GB. |
+
+**Roughly 420 GB**, and not one of them is something you would choose over a pack you are keeping.
+
+### Too big for this machine — identified, not deleted
+
+None of these are installed, so there is nothing to remove. They are listed so you recognise them and do not install one by accident.
+
+| Pack | Experts needed | Why it misses |
 |---|---:|---|
-| `qwen/IQ3_XXS` | 74 GB | `qwen/IQ3_S` — 3 points better top-1, 7 GB more RAM |
-| `qwen/IQ2_XS` | 72 GB | `qwen/IQ3_S`. It was the 64 GB ceiling; that constraint is gone. |
-| `qwen/Q2_0` | 70 GB | anything. This is the one below the quality cliff. |
-| `swift/IQ2_XS` | 68 GB | kept only if short thinking matters more than quality — see below |
-| `gyro/Gyro-S` | 59 GB | `qwen/IQ3_S`. Gyro-S was the full-expert fallback for a memory-starved machine. |
-| `gyro/Gyro-M` | 92 GB | `qwen/IQ3_S` — Gyro-M is ~IQ3_XXS quality, which IQ3_S beats outright |
-| `qwen36/UD-Q4_K_XL` | 23 GB | `qwen36/Q8_0` — same model, 15 GB more disk, materially better |
-| `qwen36/UD-Q6_K_XL` | 33 GB | `qwen36/Q8_0`, for the same reason |
+| `unsloth/UD-Q5_K_XL` | ~95 GB | Past the ~79 GB available with everything paused. 94.6% top-1, half a point above UD-Q4_K_XL, for memory you do not have. |
+| `unsloth/UD-Q6_K_XL` | ~110 GB | The same, further out. |
+| `unsloth/Q8_0` | ~130 GB | The barely-quantised 125B. Needs 128 GB of RAM and then some. |
+| `qwen36` at full precision | ~136 GB | 188 GB of download as well. |
+| `nvfp4/NVFP4-NVIDIA`, `NVFP4-QAD` | same as `NVFP4` | **Disk is the problem here, not memory** — roughly 128 GB each for variants of a pack you already have. A different kind of "too big": a larger drive buys these back, where more RAM would not. |
 
-**That frees about 491 GB**, which is the whole point: those eight exist to make a 32 GB machine work, and you no longer have one.
+**If you ever want to remove one of the large packs you are keeping**, the method is the one below — `strata models explain <name>` to find the files, then `rm -rf` what it names. Nothing in this kit deletes them for you, and `--tier all` would fetch them again.
 
-**The one judgement call is `swift/IQ2_XS`.** Its argument was never quality — it matches IQ2_XS, which IQ3_S beats. Its argument is that Flash-Next thinks at `xhigh` by default and can spend a long time reasoning before the answer starts, and Swift is a fine-tune that thinks much shorter at the same quality. If verbose reasoning actually bothers you in daily use, keep it and accept that it is the fastest-to-answer model rather than the best. If it does not, delete it — `reasoning_effort` on the API gives you some of the same control without 68 GB.
+### How to remove a pack
 
-### Never worth installing on this machine
+There is no `strata models remove`. The verbs are `list`, `inspect`, `explain`, `import` and `move`, so deletion is manual and the first step is always to ask Strata where the files are:
 
-| Pack | Why not |
-|---|---|
-| `unsloth/UD-Q5_K_XL`, `UD-Q6_K_XL`, `Q8_0` | Past 96 GB of experts. Each is also larger on disk than the 128 GB NVFP4 pack. |
-| `unsloth/UD-IQ1_M`, `UD-Q2_0`, `UD-IQ2_XS`, `UD-Q2_K_XL`, `UD-IQ3_XXS`, `UD-Q3_K_XL` | Below the sizes you can comfortably run. These are the same family's answers for smaller machines. |
-| `nvfp4/NVFP4-NVIDIA`, `nvfp4/NVFP4-QAD` | Same memory as `NVFP4`; it is ~128 GB each of disk for variants of a pack you already have. |
-| `swift/IQ3_XXS`, `swift/IQ3_S` | Duplicate Flash-Next sizes you already hold, for ~150 GB. |
-| `qwen/Q2_0` and below, anywhere | Below the quality cliff. |
+```sh
+strata models explain <name>       # changes nothing; prints the paths it uses
+```
+
+Then remove the directories it names, and the matching launch preset:
+
+```sh
+rm -rf ~/Documents/Strata/Models/<pack-directory>
+rm -rf ~/Documents/Strata/packs/<pack-name>
+rm -f  ~/.config/strata/launch-presets/<preset>.json
+strata models list                 # confirm it is gone
+```
+
+Three cautions learned on this machine:
+
+- **`~/Documents/Strata/models` is a symlink to `Models`.** `du` reports the symlink as 0 bytes, which makes the store look empty when it holds 490 GB.
+- **There are two stores.** `~/Documents/Strata/` and `~/.local/share/strata/Strata-data/`. A pack reported `present` may have its weights in either, which is exactly what `explain` is for.
+- **`mtp/` is shared.** The draft layers are used by more than one pack. Deleting one pack's directory does not mean its MTP entry is now orphaned, so leave `mtp/` alone unless `explain` tells you otherwise.
 
 ## Tier A — modest, and fits with everything running
 
