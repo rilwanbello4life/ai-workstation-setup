@@ -102,6 +102,8 @@ ai-workstation-setup/
     ├── filesystem-map.md        Absolute paths: models, apps, state, units
     ├── remote-access.md         Reaching the models from a phone or laptop
     ├── strata-models.md         Full model catalogue, 64 GB and 96 GB tiers
+    ├── harnesses.md             Strata vs llama.cpp, and the alternatives to both
+    ├── uncensored-models.md     Abliterated and uncensored models, via llama.cpp
     ├── ram-upgrade-decision.md  Phase 11: add or swap, and what each costs
     ├── roadmap.md               Phases 23-27: MCP, dictation, authoring, dashboard
     ├── 4tb-upgrade.md           What a bigger drive buys, and the cherry-pick list

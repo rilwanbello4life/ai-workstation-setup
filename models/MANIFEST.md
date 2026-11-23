@@ -6,6 +6,25 @@ Download with [`download-models.ps1`](download-models.ps1) (Windows) or [`downlo
 
 **Verification status** is marked on each entry. Entries marked *verify* are correct in shape but the exact repository may have been renamed — use ComfyUI Manager's model browser or `hf search` to confirm before downloading rather than trusting the string blindly.
 
+## What the memory upgrade changes, and what it does not
+
+96 GB of RAM changes the text models completely and the image, video and voice models not at all. The reason is worth internalising before pruning anything, because the instinct to "use bigger models now" is right for one of these and wrong for the others.
+
+**Language models are memory-bound.** A 125B MoE touches ~2% of its parameters per token, so experts can live in RAM and be fetched as needed. More RAM means more experts resident means a bigger model runs. That is the whole story of [strata-models.md](../reference/strata-models.md), and at 96 GB the small packs genuinely are obsolete.
+
+**Diffusion models are VRAM-bound.** Image and video generation runs every parameter for every step. There is no sparse activation to exploit and no useful way to stream weights from RAM mid-step — a model that does not fit in 16 GB of VRAM either runs at a fraction of the speed or does not run. **The upgrade bought nothing here.** The card still governs, and the right models are the same ones as before.
+
+So, applying the same "delete what is outclassed" logic to each group:
+
+| Group | Verdict |
+|---|---|
+| **Voice** | Nothing to prune. Kokoro-82M and faster-whisper-large-v3-turbo are 3 GB together, both are already the best of their kind at this size, and both run on CPU so they never compete with the GPU. |
+| **Image** | Z-Image Turbo stays. It is a distilled few-step model — the point is 4–8 steps rather than 30, and a bigger model does not outclass it so much as do a different job. If you want a quality tier beside it, that is an addition, not a replacement. |
+| **Video** | Here the logic does apply. **Wan 2.2 I2V-A14B GGUF outclasses TI2V-5B**, and if you install the 14B there is little reason to keep the 5B — 13 GB back. Keep the 5B only while you are still deciding, since it is the one that runs comfortably in 16 GB. |
+| **Text (GGUF)** | Qwen2.5-14B-Instruct Q4_K_M stays despite being small. It is 9 GB, it is VRAM-resident, and LiteLLM's `local` and `checker` aliases point at it — deleting it silently breaks two routes. It is infrastructure, not a model you chose. |
+
+The general principle: **prune where more memory made something obsolete, not everywhere at once.** A small language model next to a 125B is redundant. A small diffusion model next to a large one is a speed tier you will actually use.
+
 ## Text
 
 Handled outside this manifest:

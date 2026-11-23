@@ -4,6 +4,8 @@ Strata is not a single-model runner. It serves a handful of base models, and mos
 
 Install and switch with [`../ubuntu/07-strata.sh`](../ubuntu/07-strata.sh) or [`../windows/05-install-ai-stack.ps1`](../windows/05-install-ai-stack.ps1).
 
+Two companion pages. [harnesses.md](harnesses.md) covers when to use Strata rather than llama.cpp, and what else could replace either. [uncensored-models.md](uncensored-models.md) covers abliterated and uncensored models, none of which Strata can run.
+
 ## Families, and why the family matters
 
 Strata addresses a model as a **family** plus a **size**. The family is a base model *and the group who quantised it*; the size is a precision within that family. Getting the pairing wrong is the single easiest mistake to make here, because Strata validates the size name before the family, so a wrong family is not reported as a wrong family — it comes back as `<Family> has no size <Size>`, which reads like the model is missing.
@@ -26,6 +28,32 @@ Twenty-eight combinations in total. Two things in that table are worth pausing o
 - **`UD-Q4_K_XL` and `Q8_0` each appear in two families**, and mean different models in each. `qwen36/UD-Q4_K_XL` is a 23 GB quant of the 35B; `unsloth/UD-Q4_K_XL` is a 111 GB quant of the 125B. Same size name, nothing else in common.
 
 `./07-strata.sh --catalogue` prints this table from the live install along with a measured download size for every row. It asks Strata and downloads nothing, so prefer it to this page whenever the two disagree.
+
+## Choosing: family first, then size
+
+Most of the confusion here comes from treating "which model" as one question. It is two, asked in order.
+
+**The family is a decision about what the model is.** Six of the seven families are the same 125B base model prepared by different people, and one is a different model entirely:
+
+| If you want | Family | Because |
+|---|---|---|
+| The flagship, highest quality available | `unsloth` | Dynamic quantisation — precision is allocated per tensor rather than uniformly, so a given file size scores better. Top of the quality ladder below. |
+| The same thing, plainly quantised | `qwen` | The reference quants. Nothing wrong with them; `unsloth` simply beats them at equal size. |
+| FP4 hardware acceleration | `nvfp4` | Your RTX 5070 Ti has FP4 tensor cores. This is the only family built for them. |
+| Every expert kept, no quantisation of the routing | `gyro` | A different compression approach that preserves all experts. Trades differently: less GPU memory for similar quality. |
+| Code | `coder` | A fine-tune that is deliberately weak outside code and non-English. Not a general model with coding ability — a coding instrument. |
+| Short answers rather than long reasoning | `swift` | Same quality as the equivalent Flash-Next size with far shorter thinking. A latency choice, not a quality one. |
+| A small, fast, permissively licensed model | `qwen36` | A different and much smaller base model. Apache 2.0, accepts video input, runs in a fraction of the memory. |
+
+**The size is a decision about how much of the model's quality you keep.** Within a family, every size is the same network at a different precision. Higher is better and bigger; there is no "different strengths" trade between them, only quality against memory and speed.
+
+Three rules that cover almost every case:
+
+1. **Pick the largest size your RAM holds, then stop.** The quality ladder is monotonic. There is no reason to run a smaller size than fits except speed, and the speed difference between adjacent sizes is far smaller than the quality difference at the bottom of the ladder.
+2. **Do not go below IQ2_XS on the 125B.** Q2_0 is where perplexity jumps about 10% while everything above it stays within 2%. That is a cliff, not a gradient.
+3. **Quantise a big sparse model harder than a small dense one.** A 125B MoE at 3 bits has enormous total capacity to draw on. A 27B dense model at 3 bits is just a damaged 27B model. This is why Flash-Next at IQ3_S is excellent and why the uncensored dense models in [uncensored-models.md](uncensored-models.md) should be Q6 or Q8.
+
+**When the two decisions interact:** `UD-Q4_K_XL` and `Q8_0` each exist in two families and mean different models in each. `qwen36/UD-Q4_K_XL` is a 23 GB quant of the 35B; `unsloth/UD-Q4_K_XL` is a 111 GB quant of the 125B. Strata validates the size before the family, so getting this wrong reports `<Family> has no size <Size>` rather than naming the real mistake.
 
 ## The base models
 
@@ -84,6 +112,60 @@ The arithmetic is in [server-architecture.md](server-architecture.md).
 In the 96 GB configuration this machine runs **four DIMMs at roughly DDR5-3600**, below the dual-module rate, and Strata computes cold experts on the CPU. Every tokens-per-second figure on this page was measured on a full-speed system — expect less here, by an amount only measurement can tell you.
 
 The shortfall is smaller than the headline suggests, because the 9800X3D is a single-CCD part whose Infinity Fabric caps delivered bandwidth around 60–64 GB/s however fast the memory is. Reckon on losing a fifth rather than two fifths, and nothing at all on the hot experts held in VRAM. See [ram-upgrade-decision.md](ram-upgrade-decision.md).
+
+## The 96 GB working set — what to keep
+
+The tiers below this section were written for a machine that had to choose. At 96 GB most of them collapse into one answer, so this is the recommendation and the tier tables are the reasoning behind it.
+
+The budget, measured rather than nominal. `free -h` reports **89 GiB** usable. Take 10 GB for the operating system and desktop, and 15 GB more when the server platform is up:
+
+| | Available for experts |
+|---|---:|
+| Cluster up | **~64 GB** |
+| After `ai-pause --cluster` | **~79 GB** |
+
+Those are 4 GB tighter than the figures in the tier tables, which assumed 93 GiB. Treat anything within 5 GB of the limit as needing a measurement rather than an assumption.
+
+### Keep these five
+
+| Pack | Experts | When | What it is for |
+|---|---:|---|---|
+| **`unsloth/UD-IQ4_XS`** | 62 GB | cluster up, 2 GB margin | The best quality that runs day to day. 88.9% top-1. |
+| **`qwen/IQ3_S`** | 50 GB | cluster up, comfortable | The one to default to. 87.7% top-1 for 12 GB less, with room to breathe. |
+| **`coder/IQ1_M`** | 23 GB | always | The coding instrument. Low precision is not a compromise here — it is a different model, fine-tuned for one job. |
+| **`qwen36/Q8_0`** | ~10 GB | always | Small, fast, Apache 2.0, accepts video. The one to use when the 125B is overkill, and the only one you can run beside something else. |
+| **`nvfp4/NVFP4`** | 70 GB | after `ai-pause`, 9 GB margin | The only pack built for your card's FP4 tensor cores. Worth owning for the hardware match alone. |
+
+That is roughly **387 GB on disk** and covers every situation this machine encounters: a quality ceiling, a comfortable default, a coder, a lightweight general model, and the hardware-native option.
+
+**`unsloth/UD-Q4_K_XL` is the sixth**, if disk allows. At 93.1% top-1 it is the best-scoring pack you can execute at all, and 78 GB of experts against ~79 GB available after pausing is a 1 GB margin — which is to say it will sometimes work and sometimes not, depending on what else the kernel is holding. Keep it if you want the ceiling and accept that reaching it is an event rather than a default.
+
+### Delete these — bigger packs already do the job
+
+| Pack | On disk | Superseded by |
+|---|---:|---|
+| `qwen/IQ3_XXS` | 74 GB | `qwen/IQ3_S` — 3 points better top-1, 7 GB more RAM |
+| `qwen/IQ2_XS` | 72 GB | `qwen/IQ3_S`. It was the 64 GB ceiling; that constraint is gone. |
+| `qwen/Q2_0` | 70 GB | anything. This is the one below the quality cliff. |
+| `swift/IQ2_XS` | 68 GB | kept only if short thinking matters more than quality — see below |
+| `gyro/Gyro-S` | 59 GB | `qwen/IQ3_S`. Gyro-S was the full-expert fallback for a memory-starved machine. |
+| `gyro/Gyro-M` | 92 GB | `qwen/IQ3_S` — Gyro-M is ~IQ3_XXS quality, which IQ3_S beats outright |
+| `qwen36/UD-Q4_K_XL` | 23 GB | `qwen36/Q8_0` — same model, 15 GB more disk, materially better |
+| `qwen36/UD-Q6_K_XL` | 33 GB | `qwen36/Q8_0`, for the same reason |
+
+**That frees about 491 GB**, which is the whole point: those eight exist to make a 32 GB machine work, and you no longer have one.
+
+**The one judgement call is `swift/IQ2_XS`.** Its argument was never quality — it matches IQ2_XS, which IQ3_S beats. Its argument is that Flash-Next thinks at `xhigh` by default and can spend a long time reasoning before the answer starts, and Swift is a fine-tune that thinks much shorter at the same quality. If verbose reasoning actually bothers you in daily use, keep it and accept that it is the fastest-to-answer model rather than the best. If it does not, delete it — `reasoning_effort` on the API gives you some of the same control without 68 GB.
+
+### Never worth installing on this machine
+
+| Pack | Why not |
+|---|---|
+| `unsloth/UD-Q5_K_XL`, `UD-Q6_K_XL`, `Q8_0` | Past 96 GB of experts. Each is also larger on disk than the 128 GB NVFP4 pack. |
+| `unsloth/UD-IQ1_M`, `UD-Q2_0`, `UD-IQ2_XS`, `UD-Q2_K_XL`, `UD-IQ3_XXS`, `UD-Q3_K_XL` | Below the sizes you can comfortably run. These are the same family's answers for smaller machines. |
+| `nvfp4/NVFP4-NVIDIA`, `nvfp4/NVFP4-QAD` | Same memory as `NVFP4`; it is ~128 GB each of disk for variants of a pack you already have. |
+| `swift/IQ3_XXS`, `swift/IQ3_S` | Duplicate Flash-Next sizes you already hold, for ~150 GB. |
+| `qwen/Q2_0` and below, anywhere | Below the quality cliff. |
 
 ## Tier A — modest, and fits with everything running
 
