@@ -43,6 +43,24 @@ rm -f ~/ai/comfyui/models/vae/wan2.2_vae.safetensors   # only if the 14B uses it
 
 Leave `umt5_xxl_fp8_e4m3fn_scaled.safetensors` alone — the text encoder is shared between both Wan models, and it is the same trap as Strata's n-gram shard: a file listed under one model that another still needs.
 
+### Measured on this machine (2026-11-23)
+
+`AI_ROOT` is `~/ai/models` here — the kit default is `~/ai`, so if your paths look different, that is fine as long as everything lives under one root.
+
+| What | On disk | Verdict |
+|---|---:|---|
+| Z-Image Turbo (`z_image_turbo_bf16`) | 11.5 GB | Keep. The photorealistic default for 16 GB. |
+| Wan 2.2 TI2V-5B | 9.3 GB | Keep. The practical video model on this card. |
+| Text encoders (Qwen3-4B + umT5) | 14 GB | Keep. Shared by image and video. |
+| VAEs | 1.7 GB | Keep. |
+| Kokoro + Whisper | ~2 GB | Keep. Already best-in-class at this size. |
+| Qwen2.5-14B Q4_K_M GGUF | 8.4 GB | Keep. Infrastructure for LiteLLM's `local` / `checker`, not a "small model to prune". |
+| Wan 2.2 14B | absent | Not missing in the sense of a hole — it is the slow quality option, not the default. |
+| FLUX.2 klein 4B | absent | **The one gap worth filling.** ~3 s/image against Z-Image's ~11 s; reuses the Qwen3-4B conditioner you already have. |
+| RealESRGAN x4 | absent | Small and useful. Empty `upscale_models/` otherwise. |
+
+**Nothing here is a candidate for deletion.** The whole ComfyUI + voice + GGUF set is about 45 GB — less than one of the Strata packs you just removed. The upgrade to 96 GB did not obsolete any of it, because these models are bound by the 16 GB card, not by system RAM.
+
 ## Text
 
 Handled outside this manifest:
