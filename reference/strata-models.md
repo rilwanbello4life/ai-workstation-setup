@@ -139,7 +139,17 @@ Two directories, which matters before deleting anything.
 └── dflash2/                823 MB
 ```
 
-`~/.local/share/strata/Strata-data/` is the other one, and it is where the launch config pointed when `qwen36-UD-Q4_K_XL` was serving. **A pack reported `present` by `strata models list` may have its weights in either place.** Use `strata models explain <name>` before deleting anything — it prints where Strata looks and what it finds, and changes nothing.
+The second store is `~/.local/share/strata/Strata-data/`, and it is the larger half:
+
+```
+~/.local/share/strata/Strata-data/
+├── models/                 364 GB
+├── packs/                  195 GB
+├── mtp/                    6.5 GB
+└── dflash2/                823 MB
+```
+
+Which store a pack lands in depends on what `data_dir` was set to when it was installed, so the split follows install order rather than anything meaningful. **A pack reported `present` by `strata models list` may have its weights in either place, or — if only its run config survives — in neither.** Use `strata models explain <size>` before deleting anything; it prints where Strata looks, what it found, and the exact file sizes, and changes nothing.
 
 There is **no remove verb**. `strata models` offers `list, inspect, explain, import, move` and nothing else, so removal is `rm -rf` on directories you have confirmed with `explain`.
 
@@ -196,23 +206,41 @@ None of these are installed, so there is nothing to remove. They are listed so y
 There is no `strata models remove`. The verbs are `list`, `inspect`, `explain`, `import` and `move`, so deletion is manual and the first step is always to ask Strata where the files are:
 
 ```sh
-strata models explain <name>       # changes nothing; prints the paths it uses
+strata models explain IQ3_XXS      # changes nothing; prints the paths it uses
 ```
 
-Then remove the directories it names, and the matching launch preset:
+**`explain` takes the size name, not the folder tag `models list` printed.** `strata models explain iq3_xxs` works because the size is unique; `gyro-gyro-s` and `swift-iq2_xs` are rejected outright. Use `Gyro-S`, and add `--family` where a size exists in more than one family — `UD-Q4_K_XL` and `Q8_0` both do. The error is helpful rather than cryptic: it lists every size it knows.
+
+Then remove the directories it names, the installed run config, and the launch preset:
 
 ```sh
-rm -rf ~/Documents/Strata/Models/<pack-directory>
-rm -rf ~/Documents/Strata/packs/<pack-name>
+rm -rf <the directory explain printed under "Uses:">
+rm -f  ~/.local/share/strata/install/strata-<tag>.json
 rm -f  ~/.config/strata/launch-presets/<preset>.json
 strata models list                 # confirm it is gone
 ```
+
+The run config is what makes a pack show as `present`. Deleting the weights without it leaves an entry in `models list` pointing at nothing, which is worse than either state on its own.
 
 Three cautions learned on this machine:
 
 - **`~/Documents/Strata/models` is a symlink to `Models`.** `du` reports the symlink as 0 bytes, which makes the store look empty when it holds 490 GB.
 - **There are two stores.** `~/Documents/Strata/` and `~/.local/share/strata/Strata-data/`. A pack reported `present` may have its weights in either, which is exactly what `explain` is for.
-- **`mtp/` is shared.** The draft layers are used by more than one pack. Deleting one pack's directory does not mean its MTP entry is now orphaned, so leave `mtp/` alone unless `explain` tells you otherwise.
+- **`mtp/` is shared.** The draft layers are used by more than one pack. Deleting one pack's directory does not mean its MTP entry is orphaned, so leave `mtp/` alone unless `explain` tells you otherwise.
+
+### Confirmed on this machine
+
+Verified with `explain`, in `~/.local/share/strata/Strata-data/models/`:
+
+| Pack | Directory | Measured |
+|---|---|---:|
+| `qwen/Q2_0` | `Q2_0` | 66.4 GB in 2 files |
+| `qwen/IQ2_XS` | `IQ2_XS` | 68.0 GB in 2 files |
+| `qwen/IQ3_XXS` | `IQ3_XXS` | 75.8 GB in 2 files |
+
+**210 GB**, all three beaten by `qwen/IQ3_S`, which stays. Each has a run config at `~/.local/share/strata/install/strata-<tag>.json` to remove with it.
+
+Note the second file in each pair is 28.80 GB and identical across all three — that is the n-gram table, and it is held per pack rather than shared. Deleting a pack genuinely frees its full size.
 
 ## Tier A — modest, and fits with everything running
 
