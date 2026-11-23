@@ -228,19 +228,34 @@ Three cautions learned on this machine:
 - **There are two stores.** `~/Documents/Strata/` and `~/.local/share/strata/Strata-data/`. A pack reported `present` may have its weights in either, which is exactly what `explain` is for.
 - **`mtp/` is shared.** The draft layers are used by more than one pack. Deleting one pack's directory does not mean its MTP entry is orphaned, so leave `mtp/` alone unless `explain` tells you otherwise.
 
-### Confirmed on this machine
+### What a deletion actually frees — less than `explain` reports
 
-Verified with `explain`, in `~/.local/share/strata/Strata-data/models/`:
+Measured, not predicted. Deleting `Q2_0`, `IQ2_XS` and `IQ3_XXS` — which `explain` totals at **210 GB** — returned **116 GiB**.
 
-| Pack | Directory | Measured |
-|---|---|---:|
-| `qwen/Q2_0` | `Q2_0` | 66.4 GB in 2 files |
-| `qwen/IQ2_XS` | `IQ2_XS` | 68.0 GB in 2 files |
-| `qwen/IQ3_XXS` | `IQ3_XXS` | 75.8 GB in 2 files |
+The arithmetic says exactly why. Each of those packs is two files: a unique quantised shard, and a second shard of 28.80 GB that is byte-identical across all three. Sum the unique shards only — 37.62 + 39.23 + 47.04 = 123.89 GB — and convert to the GiB `df` reports, and you get **115.4 GiB** against 116 observed.
 
-**210 GB**, all three beaten by `qwen/IQ3_S`, which stays. Each has a run config at `~/.local/share/strata/install/strata-<tag>.json` to remove with it.
+**The 29 GB n-gram table is shared storage, not a per-pack copy.** It is the same Engram table for every Flash-Next pack, stored once and linked, so `explain` reports it against each pack that uses it while the disk holds one. Deleting a pack frees its unique shard; the table goes only when the last pack referencing it goes.
 
-Note the second file in each pair is 28.80 GB and identical across all three — that is the n-gram table, and it is held per pack rather than shared. Deleting a pack genuinely frees its full size.
+Two consequences worth carrying:
+
+- **Estimate savings from the unique shard, not the reported total.** For a Flash-Next pack, subtract about 29 GB from whatever `explain` adds up.
+- **The packs with a single file are the honest ones.** `gyro/Gyro-S` is one 58.49 GB file and `gyro/Gyro-M` is one 91.97 GB file, with no shared shard to discount — deleting those returns very nearly what they claim.
+
+### Confirmed paths on this machine
+
+All verified with `explain`. Note that the folder spellings are inconsistent — some carry the family prefix and some do not, which is why guessing a path is a bad idea even when the pattern looks obvious.
+
+| Pack | Directory | `explain` total | Realistic saving |
+|---|---|---:|---:|
+| `gyro/Gyro-S` | `Strata-data/models/gyro-Gyro-S` | 58.5 GB | ~54 GiB |
+| `gyro/Gyro-M` | `Strata-data/models/gyro-Gyro-M` | 92.0 GB | ~86 GiB |
+| `qwen36/UD-Q6_K_XL` | `Strata-data/models/qwen36-UD-Q6_K_XL` | 32.6 GB | ~30 GiB |
+| `qwen36/UD-Q4_K_XL` | `Strata-data/models/qwen36-UD-Q4_K_XL` | 22.9 GB | ~21 GiB |
+| `swift/IQ2_XS` | `Documents/Strata/models/swift-IQ2_XS` | 68.2 GB | ~63 GiB |
+
+Swift is the only one of these in the `Documents/Strata` store, and its second shard is 28.36 GB rather than 28.80 — a *different* n-gram table, because Swift is a different fine-tune. Since it is the only Swift pack installed, deleting it frees both files.
+
+`qwen36/UD-Q4_K_XL` and `UD-Q6_K_XL` each list a 0.90 GB `mmproj-F16.gguf` picture reader. That is shared with `qwen36/Q8_0`, which stays, so it will survive both deletions.
 
 ## Tier A — modest, and fits with everything running
 

@@ -87,6 +87,10 @@ Usage:
                                       record packs Strata already has
   ./07-strata.sh --catalogue          every family and size Strata offers,
                                       with measured download sizes
+  ./07-strata.sh --remove Gyro-S Gyro-M
+                                      delete packs, asking first. Resolves
+                                      each path through 'strata models
+                                      explain' rather than guessing it
 
 Options:
   --tier LETTERS   any combination of a b c d e f g, or "all"  (default: a)
@@ -99,6 +103,11 @@ Options:
   --retry-failed   re-attempt entries the ledger records as failed (default)
   --skip-failed    leave previously failed entries alone
   --status         print the ledger and exit, changing nothing
+  --remove NAMES   delete one or more packs and their run configs. Takes the
+                   SIZE name as Strata spells it - 'Gyro-S', not the folder
+                   tag 'gyro-gyro-s' - and 'family/Size' where a size exists
+                   in more than one family. Asks before each unless -y.
+                   Must be the last option; everything after it is a name.
   --catalogue      ask Strata for every family and size it offers, measure
                    each one with --plan, and show which tier installs it.
                    Read-only: it downloads nothing and changes nothing.
@@ -117,6 +126,8 @@ SKIP_FAILED=no
 SHOW_STATUS=no
 RECONCILE=no
 CATALOGUE=no
+REMOVE=no
+REMOVE_NAMES=()
 
 while (( $# )); do
     case "$1" in
@@ -128,6 +139,7 @@ while (( $# )); do
         --status)        SHOW_STATUS=yes; shift ;;
         --reconcile)     RECONCILE=yes; shift ;;
         --catalogue)     CATALOGUE=yes; shift ;;
+        --remove)        REMOVE=yes; shift; REMOVE_NAMES=("$@"); break ;;
         -y|--yes)        ASSUME_YES=yes; shift ;;
         -h|--help)       usage; exit 0 ;;
         *) die "Unknown option: $1 (try --help)" ;;
@@ -149,6 +161,86 @@ want_tier() {
     done
     return 1
 }
+
+# ---------------------------------------------------------------------------
+# Removal. Strata has no remove verb - 'strata models' offers list, inspect,
+# explain, import and move - so this does it, and does it by asking Strata
+# where the files are rather than constructing a path.
+#
+# That matters more than it sounds. The folder spellings are not consistent:
+# qwen/IQ3_XXS lives in models/IQ3_XXS with no prefix, gyro/Gyro-S lives in
+# models/gyro-Gyro-S with one, and swift/IQ2_XS is in an entirely different
+# data directory from both. A constructed path would be wrong often enough to
+# be dangerous, and wrong in the direction of deleting nothing while
+# reporting success.
+#
+# Note what is NOT reclaimed. A Flash-Next pack's second shard is the ~29 GB
+# Engram n-gram table, shared across every pack of that base model and stored
+# once. 'explain' counts it against each pack that uses it, so removing three
+# packs that each report 70 GB returns about 116 GiB rather than 210 GB. The
+# figure printed below is the unique part, which is what you actually get.
+if [[ "$REMOVE" == yes ]]; then
+    section "Removing model packs"
+    (( ${#REMOVE_NAMES[@]} )) || die "Nothing named. Try: --remove Gyro-S Gyro-M"
+    have strata || die "strata is not installed."
+
+    for name in "${REMOVE_NAMES[@]}"; do
+        echo
+        info "Asking Strata about $name"
+
+        # explain takes the SIZE name, not the folder tag that 'models list'
+        # prints. 'Gyro-S' works; 'gyro-gyro-s' is rejected. Where a size
+        # exists in two families - UD-Q4_K_XL and Q8_0 both do - pass it as
+        # "family/Size" and this splits it.
+        fam=""; size="$name"
+        if [[ "$name" == */* ]]; then fam="${name%%/*}"; size="${name##*/}"; fi
+
+        if [[ -n "$fam" ]]; then
+            exp="$(strata models explain "$size" --family "$fam" 2>&1)" || true
+        else
+            exp="$(strata models explain "$size" 2>&1)" || true
+        fi
+
+        if ! grep -q '^Uses: ' <<<"$exp"; then
+            warn "Strata could not resolve '$name'. It said:"
+            sed 's/^/    /' <<<"$exp" | head -n 4
+            warn "Sizes are case-sensitive, and a size in two families needs family/Size."
+            continue
+        fi
+
+        # "Uses: /path (setup's spelling)" - take the path, drop the comment.
+        dir="$(sed -n 's/^Uses: //p' <<<"$exp" | head -n1 | sed 's/ ([^)]*)$//')"
+        [[ -d "$dir" ]] || { warn "Resolved to '$dir', which is not a directory."; continue; }
+
+        tag="$(sed -n 's/.*folder tag \([^)]*\)).*/\1/p' <<<"$exp" | head -n1)"
+        real="$(du -sh "$dir" 2>/dev/null | cut -f1)"
+
+        echo "    directory   $dir"
+        echo "    on disk     ${real:-unknown} (excludes shared shards)"
+        [[ -n "$tag" ]] && echo "    folder tag  $tag"
+
+        if [[ "$ASSUME_YES" != yes ]]; then
+            confirm "Delete $name?" || { info "Left alone."; continue; }
+        fi
+
+        rm -rf "$dir" || { oops "Could not remove $dir"; continue; }
+
+        # The run config, not the weights, is what makes a pack report as
+        # 'present'. Removing one without the other leaves 'models list'
+        # naming a pack whose files are gone.
+        if [[ -n "$tag" ]]; then
+            rm -f "$HOME/.local/share/strata/install/strata-${tag}.json"
+            rm -f "$HOME/.config/strata/launch-presets/${tag}.json"
+        fi
+        ok "Removed $name."
+    done
+
+    echo
+    section "What is left"
+    strata models list 2>/dev/null | sed 's/^/  /' || true
+    df -h / | sed 's/^/  /'
+    exit 0
+fi
 
 # ---------------------------------------------------------------------------
 section "This machine"
@@ -378,12 +470,46 @@ if (( ${#selected[@]} == 0 )); then
     die "No models selected for tier '$TIERS'. Try --tier a."
 fi
 
+# Packs that a 96 GB machine holds something strictly better than. Every one
+# is outclassed by qwen/IQ3_S or qwen36/Q8_0, both of which fit here with the
+# cluster running - so on this machine they are disk spent on a worse answer.
+# They stay in the tiers because the tiers describe 32 and 64 GB machines too,
+# where several of them are the best available. The marker is advisory; it
+# changes what is printed, never what is installed.
+# One line deliberately. Wrapping it put a newline where the membership test
+# expects a space, and the entry beside the break silently stopped matching.
+SUPERSEDED_96="qwen/q2_0 qwen/iq2_xs qwen/iq3_xxs gyro/Gyro-S gyro/Gyro-M swift/IQ2_XS qwen36/UD-Q4_K_XL qwen36/UD-Q6_K_XL"
+
+# 85, not 90. This machine fills four DIMMs to 96 GB and MemTotal reports
+# 89 - lower than the ~93 the comment at the top of this file predicted,
+# because what the firmware reserves varies with how the slots are populated.
+# A threshold of 90 would have excluded the exact hardware it was written for.
+superseded_here() {
+    (( ram_gb >= 85 )) || return 1
+    [[ " ${SUPERSEDED_96} " == *" $1/$2 "* ]]
+}
+
 printf '  %-5s %-7s %-11s %5s  %s\n' TIER FAMILY MODEL SIZE DESCRIPTION
+sup_count=0
+sup_gb=0
 for entry in "${selected[@]}"; do
     IFS='|' read -r fam mod tier gb desc <<<"$entry"
-    printf '  %-5s %-7s %-11s %4sG  %s\n' "${tier^^}" "$fam" "$mod" "$gb" "$desc"
+    mark=""
+    if superseded_here "$fam" "$mod"; then
+        mark="  <- outclassed on this machine"
+        sup_count=$(( sup_count + 1 ))
+        sup_gb=$(( sup_gb + gb ))
+    fi
+    printf '  %-5s %-7s %-11s %4sG  %s%s\n' "${tier^^}" "$fam" "$mod" "$gb" "$desc" "$mark"
 done
 echo
+
+if (( sup_count > 0 )); then
+    warn "${sup_count} of these are outclassed at ${ram_gb} GB - about ${sup_gb} GB."
+    warn "Each is beaten by qwen/IQ3_S or qwen36/Q8_0, which fit with the cluster up."
+    warn "Remove with --remove, or see reference/strata-models.md for the argument."
+    echo
+fi
 
 # The plan rows, as the ledger sees them. Built once and reused for every
 # progress print so the list cannot drift from what is actually being done.

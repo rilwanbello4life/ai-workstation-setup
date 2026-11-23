@@ -20,10 +20,28 @@ So, applying the same "delete what is outclassed" logic to each group:
 |---|---|
 | **Voice** | Nothing to prune. Kokoro-82M and faster-whisper-large-v3-turbo are 3 GB together, both are already the best of their kind at this size, and both run on CPU so they never compete with the GPU. |
 | **Image** | Z-Image Turbo stays. It is a distilled few-step model — the point is 4–8 steps rather than 30, and a bigger model does not outclass it so much as do a different job. If you want a quality tier beside it, that is an addition, not a replacement. |
-| **Video** | Here the logic does apply. **Wan 2.2 I2V-A14B GGUF outclasses TI2V-5B**, and if you install the 14B there is little reason to keep the 5B — 13 GB back. Keep the 5B only while you are still deciding, since it is the one that runs comfortably in 16 GB. |
+| **Video** | Here the logic does apply, **but only if the 14B is actually installed**. Wan 2.2 I2V-A14B GGUF outclasses TI2V-5B, and once you have it the 5B is 13 GB of a worse answer. Until then the 5B is your only video model and deleting it leaves you with none. Check before removing anything — the 14B is a *verify* entry, not in `manifest.tsv`, so `download-models.sh all` never fetched it. |
 | **Text (GGUF)** | Qwen2.5-14B-Instruct Q4_K_M stays despite being small. It is 9 GB, it is VRAM-resident, and LiteLLM's `local` and `checker` aliases point at it — deleting it silently breaks two routes. It is infrastructure, not a model you chose. |
 
 The general principle: **prune where more memory made something obsolete, not everywhere at once.** A small language model next to a 125B is redundant. A small diffusion model next to a large one is a speed tier you will actually use.
+
+### Checking before pruning
+
+```sh
+du -sh ~/ai/comfyui/models/*/ ~/ai/voice/* ~/ai/gguf/* 2>/dev/null | sort -h
+ls -la ~/ai/comfyui/models/diffusion_models/
+```
+
+The thing to establish is whether the Wan 2.2 **14B** files are there at all. They are a *verify* entry rather than a `manifest.tsv` one, so `download-models.sh all` did not fetch them — on a machine that only ever ran the script, the 5B is the only video model present and there is nothing to prune.
+
+If both are present, the 5B goes:
+
+```sh
+rm -f ~/ai/comfyui/models/diffusion_models/wan2.2_ti2v_5B_fp16.safetensors
+rm -f ~/ai/comfyui/models/vae/wan2.2_vae.safetensors   # only if the 14B uses its own VAE
+```
+
+Leave `umt5_xxl_fp8_e4m3fn_scaled.safetensors` alone — the text encoder is shared between both Wan models, and it is the same trap as Strata's n-gram shard: a file listed under one model that another still needs.
 
 ## Text
 
