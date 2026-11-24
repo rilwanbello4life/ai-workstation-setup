@@ -16,14 +16,16 @@
 # way of finding it rather than a second copy of it. 'docs' on any entry
 # prints the underlying command, so the console teaches its own replacement.
 #
-# The one piece of real logic is the GPU rule. Strata, llama.cpp and ComfyUI
-# cannot coexist: 16 GB of VRAM holds one, and a Strata pack pins 25-62 GB of
-# system RAM on top. Starting a second does not fail cleanly - it refuses
-# somewhere deep in a CUDA library, or the desktop locks up while the kernel
-# pages. So anything marked [gpu] is started through ops/switch.sh, which
-# stops the incumbent and waits for the driver to release the memory first.
-# Anything marked [cpu] skips all of that, because it genuinely can run
-# alongside.
+# The one piece of real logic is the GPU rule, and what makes it a rule is the
+# failure, not the policy. The three can share the card now - Strata hands
+# part of its 16 GB back and keeps 2 GiB of it free for the others - but a
+# start that does not fit does not refuse cleanly: it dies deep inside a CUDA
+# library, or the desktop locks up while the kernel pages. So anything marked
+# [gpu] is started through ops/switch.sh, which replaces that kind's
+# incumbent, waits for the driver to release the memory it took, and leaves
+# the other kinds up. What survives is whatever the card still holds, and
+# 'gpu status' is the one command that says how much is left. Anything marked
+# [cpu] skips all of that, because it genuinely can run alongside.
 #
 # Background: ../reference/ports.md, ../reference/troubleshooting.md
 
@@ -43,7 +45,7 @@ R1WC_STRATA_UI="${R1WC_STRATA_UI:-}"
 # The registry. id, group, label, kind, port, ui-url
 #
 # kind drives behaviour, not just the label:
-#   gpu  exclusive - started through switch.sh so the incumbent is stopped
+#   gpu  shares the card - switch.sh replaces that kind's incumbent only
 #   cpu  a host service that coexists with whatever holds the GPU
 #   k8s  a workload in the cluster, scaled rather than started
 #   sys  a plain systemd unit
@@ -77,7 +79,7 @@ EOF
 
 group_title() {
     case "$1" in
-        models)   printf 'MODELS - one at a time on the GPU' ;;
+        models)   printf 'MODELS - the card is shared, not handed over' ;;
         platform) printf 'PLATFORM - the cluster' ;;
         access)   printf 'ACCESS - network and sharing' ;;
         games)    printf 'GAMES' ;;
@@ -252,9 +254,12 @@ item_stop() {
     local id="$1"
     case "$id" in
         strata|llamacpp|comfyui)
-            # switch.sh none stops all three and waits for the driver to
-            # hand the memory back, which is the part worth not skipping.
-            run_it "$SWITCH" none ;;
+            # The kind you selected, not all three: the card is shared now, so
+            # evicting the others because you asked about one of them is a
+            # surprise. switch.sh still waits for the driver to hand the memory
+            # back, which is the part worth not skipping. Use switch.sh none
+            # when the whole card is wanted.
+            run_it "$SWITCH" stop "$id" ;;
         voice)     run_it sudo systemctl stop voice-server.service ;;
         cluster)   run_it sudo systemctl stop k3s.service ;;
         postgres|n8n|openwebui|litellm|searxng)
@@ -346,13 +351,16 @@ Strata - the MoE packs, the main local model server.
   Port 8080, OpenAI- and Anthropic-compatible at http://127.0.0.1:8080/v1
 
   Start        r1wc start strata, or  ops/switch.sh strata <preset>
-  Stop         ops/switch.sh none
+  Stop         ops/switch.sh stop strata   (none stops all three)
   Which packs  strata models list  /  strata launch --list-presets
   Live monitor strata launch --preset <name>     (this is Strata's UI)
 
-  [gpu] Exclusive. Starting it stops llama.cpp and ComfyUI first and waits
-  for the driver to release the VRAM. That wait is the step people skip by
-  hand, and the out-of-memory error it causes looks like a bug in the pack.
+  [gpu] Starting it stops the pack already serving - that pack only. The
+  others stay up, because Strata keeps 2 GiB of its 16 GB free (--vram-reserve-mib,
+  set in ubuntu/common.sh): enough for a quantised image model or a small GGUF,
+  not a 12 GB one. The wait for the driver to release the memory it took is
+  still the step people skip by hand, and the out-of-memory error it causes
+  looks like a bug in the pack rather than a launcher that was told to wait.
 
   The largest packs need the cluster's ~15 GB as well:
 
@@ -381,15 +389,26 @@ EOF
 llama.cpp - a single GGUF file, served on port 8081.
 
   Start   r1wc start llamacpp, or  ops/switch.sh llamacpp <file.gguf>
-  Stop    ops/switch.sh none
+  Stop    ops/switch.sh stop llamacpp  (none stops all three)
   Files   ls ~/ai/models/gguf
   API     http://127.0.0.1:8081/v1   (OpenAI-compatible)
 
-  [gpu] Exclusive with Strata and ComfyUI by default. The exception worth
-  knowing: a small GGUF can run alongside Strata, costing Strata about 9 GB
-  of VRAM and some speed. That is deliberate when you want a second model
-  whose mistakes are uncorrelated with the first - the agent 'checker' role
-  depends on exactly that. If you are not running agents, do not pay for it.
+  [gpu] Shares the card by default. Strata keeps 2 GiB of its 16 GB free,
+  which is the room a small GGUF lives in - 8081 answers beside 8080, and a
+  task can be handed between the two instead of carried between them by hand.
+  The room is a per-start choice, not a constant: STRATA_VRAM_RESERVE_MIB=8192
+  in front of the switch.sh strata start hands back 8 GiB instead of 2, and
+  whatever you ask for has to be worth paying - Strata's experts are what
+  gets given up, and its tokens run slower afterwards.
+
+  What no room on this card buys is the 9 GB Q4_K_M 14B LiteLLM's checker
+  alias points at, parked beside a pack: with that GGUF and its KV up, what
+  is left of 16 GB is under what Strata needs before a single expert is
+  placed, so the pair is a 32 GB card's. Here a checker is either a smaller
+  GGUF in the room you left, or the 14B run while no pack is resident, or
+  pointing the alias at the worker and accepting errors that correlate. A
+  GGUF that does not fit fails in the loader, and switch.sh status is what
+  shows the room before you find out that way.
 
   Rebuild after moving it: ubuntu/04-llamacpp.sh
 EOF
@@ -398,11 +417,16 @@ EOF
 ComfyUI - image and video generation. Web interface on 8188.
 
   Start   r1wc start comfyui, or  ops/switch.sh comfyui
-  Stop    ops/switch.sh none
+  Stop    ops/switch.sh stop comfyui  (none stops all three)
   Open    r1wc ui comfyui          http://127.0.0.1:8188
 
-  [gpu] Exclusive with the language models - this one genuinely will not
-  share. It will run alongside the voice server, since Whisper is on CPU.
+  [gpu] Shares the card only if the room you left holds its working set.
+  Strata keeps 2 GiB free, which is tight for an image pipeline: raise the
+  reserve on the Strata start (STRATA_VRAM_RESERVE_MIB=8192 in front of it)
+  when you want the two up at once, or ./ops/switch.sh comfyui --stop-others
+  when you want the card. A start that is short of the room dies in the
+  loader rather than saying so, and switch.sh status shows the room first.
+  The voice server always sat beside a pack, because Whisper runs on CPU.
 
   Models live under ~/ai/models/comfyui. Outputs are written to
   ~/ai/output, not inside the application directory, so a reinstall of
@@ -1054,7 +1078,7 @@ action_menu() {
         printf '\n  %s%s%s   -   currently %s\n' \
                "$_C_BOLD" "$label" "$_C_RESET" "$(item_status "$id")"
         if [[ "$kind" == gpu ]]; then
-            printf '  %s[gpu]%s starting this stops whatever else holds the card first.\n' \
+            printf '  %s[gpu]%s replaces that kind only; switch.sh status says what the card has left.\n' \
                    "$_C_YELLOW" "$_C_RESET"
         fi
         printf '\n    d  documentation - what it is and how to operate it\n'

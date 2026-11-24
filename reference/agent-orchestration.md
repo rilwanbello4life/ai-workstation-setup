@@ -43,9 +43,21 @@ No swap, because it is the same loaded model. This is the single biggest perform
 
 A validator that shares a model with the worker shares its blind spots. If the worker hallucinated an API that does not exist, the same weights asked "is this correct?" will frequently agree.
 
-So `checker` points at **llama.cpp holding a 7–14B GGUF entirely in VRAM** — a different architecture, different training data, independent failure modes. It costs ~9 GB of VRAM, which leaves Strata ~5 GB of hot-expert space instead of ~14, so Strata generates somewhat slower.
+So `checker` points at **llama.cpp holding a GGUF entirely in VRAM** — a different architecture, different training data, independent failure modes. That is the whole point of the role: a validator that shares weights with the worker shares its blind spots, and on a loop of twenty steps agreeing with a hallucinated API is exactly what a real checker exists to catch.
 
-That is a real trade and worth being explicit about: **you are buying independent verification with Strata's throughput.** If you would rather have the speed, point `checker` at the `worker` alias and accept correlated errors. The config is one line in [`../server/k8s/11-litellm.yaml`](../server/k8s/11-litellm.yaml).
+The card decides which GGUF can be that. The shipped alias names `Qwen2.5-14B-Instruct-Q4_K_M`, 9 GB of file before its own KV, and that pair belongs to a 32 GB card — there it costs ~9 GB, leaving Strata ~5 GB of hot-expert space instead of ~14, and the price is paid once per start rather than once per step. On this box's 16.3 GB there is **no reserve value that makes both halves fit**: with a 9 GB GGUF resident, what remains is under Strata's floor before a single expert is placed — its slotted base, prompt buffers and one streamed session come to about 7 GB on the engine's own fit math (`vram_fit.py`, worked through in the comment above `STRATA_ENGINE_ARGS` in [`../ubuntu/common.sh`](../ubuntu/common.sh)), and the hot-expert cache wants more above that. `--vram-reserve-mib` is the right knob and the right place for it; it just has no value here that fits. A start asked for that pair fails deep in a CUDA library instead of saying so.
+
+Three ways to get a second, genuinely different brain onto the card:
+
+| Route | What it costs |
+|---|---|
+| A smaller GGUF in the room Strata leaves | the honest answer here. 2 GiB is the shipped room, so a 3–7B quant; raise it per start with `STRATA_VRAM_RESERVE_MIB=6144 ./ops/switch.sh strata <preset>` and Strata's tokens come slower for as long as that pack stays up |
+| The 14B while no pack is resident | independent and uncorrelated, but the pair has to be taken apart and reassembled, and that is 1–3 minutes of loading each time the orchestrator wants both — on a twenty-step loop, an hour |
+| `checker` at the `worker` alias | nothing, and correlated errors: the validator agrees with whatever the worker invented |
+
+The reserve is one number in one place — `ubuntu/common.sh`'s `STRATA_VRAM_RESERVE_MIB`, overridable per start rather than per install, because it is a claim about what else is on the card and only the person starting it knows that. `ops/switch.sh status` is the command that says what the card has left before a start finds out by failing.
+
+Whichever route you pick, the trade is the same shape: **you are buying independent verification with something Strata has to give up.** If you would rather have the speed than pay it, point `checker` at the `worker` alias and accept correlated errors. The config is one line in [`../server/k8s/11-litellm.yaml`](../server/k8s/11-litellm.yaml).
 
 ```mermaid
 flowchart LR

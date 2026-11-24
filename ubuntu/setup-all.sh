@@ -172,8 +172,10 @@ cat <<EOF
     ./07-strata.sh --tier abc      see what else fits today
     reference/strata-models.md     the full catalogue
 
-  Only one heavy workload at a time on 16 GB of VRAM. Stop Strata before
-  running video generation, and vice versa.
+  The card is shared, not handed over: Strata keeps 2 GiB of its 16 GB free,
+  which holds a small GGUF or a quantised pipeline beside a pack. ./ops/switch.sh
+  replaces only that kind of workload; --stop-others clears the card when it
+  really is full.
 
   To reach any of this from a phone or laptop:  ./08-remote-access.sh
 EOF

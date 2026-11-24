@@ -79,7 +79,7 @@ ai-workstation-setup/
 │   └── download-models.{sh,ps1} Fetch and place model files
 ├── ops/                         Day-to-day running, not building
 │   ├── up.sh                    After a boot: wait for k3s, undo a leftover pause
-│   ├── switch.sh                Swap the one heavy model the GPU can hold
+│   ├── switch.sh                Replace one workload, leave the others up
 │   ├── down.sh                  Snapshot Postgres and stop cleanly
 │   └── README.md                What comes back by itself, and what does not
 └── reference/
@@ -214,7 +214,7 @@ The five recommendations you collected are one stack, not five alternatives.
 
 ## Expectations on this hardware
 
-16 GB of VRAM means **one heavy workload at a time**, with the platform as the one thing that runs continuously alongside it. RAM decides which model that workload can be.
+16 GB of VRAM is shared, not handed over: a Strata pack leaves `--vram-reserve-mib` of the card unclaimed (2 GiB by default) for llama.cpp, ComfyUI or a game, and `ops/switch.sh` replaces only the workload of the kind it starts. RAM decides which model the pack can be; what else runs at the same time is arithmetic on the card, and `ops/switch.sh status` is the one command that says how much is left before you find out by failing inside a CUDA library.
 
 - Strata locks 25–40 GB of RAM while loaded. The machine will be unresponsive for 1–3 minutes during load, and you cannot game while it runs.
 - **The server platform takes ~15 GB off the top.** With it running, the largest pack that fits is IQ2_XS (~35.5 GB of experts) at 64 GB, or UD-IQ4_XS (~62 GB) at 96 GB. `ai-pause` frees the platform for the tier above. The full table is in [reference/strata-models.md](reference/strata-models.md).

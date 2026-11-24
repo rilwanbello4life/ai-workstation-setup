@@ -6,7 +6,7 @@ The numbered scripts in `ubuntu/` and `server/` **build** the machine and are me
 |---|---|
 | [`r1wc.sh`](r1wc.sh) | **Start here.** The console: everything on one page, with docs on each entry. |
 | [`up.sh`](up.sh) | After every boot. Verifies the services, undoes a leftover pause, waits for the cluster. |
-| [`switch.sh`](switch.sh) | Whenever you want a different model. Only one fits at a time. |
+| [`switch.sh`](switch.sh) | Whenever you want a different model, or another one beside it — `status` says what the card has left. |
 | [`down.sh`](down.sh) | Before a planned shutdown or reboot. Snapshots Postgres first. |
 
 All of them are safe to run when there is nothing to do.
@@ -22,7 +22,7 @@ One page listing every service in the stack with its live state, grouped into mo
 
 It implements almost nothing itself. Each action runs the command you would have run by hand — `ops/switch.sh`, `systemctl`, `kubectl`, `ai-pause`, `platform-backup` — and the documentation for each entry names that command. So there is one implementation of every operation, and the console is a way of finding it rather than a second copy that can drift.
 
-The one piece of real logic is the GPU rule. Entries marked `[gpu]` are started through `switch.sh`, which stops whatever holds the card and waits for the driver to release the memory first. Entries without that marker skip all of it, because they genuinely coexist — the voice server runs happily beside a 60 GB pack, since Whisper and Kokoro are both on the CPU.
+The one piece of real logic is the GPU rule. Entries marked `[gpu]` are started through `switch.sh`, which stops the workload of that same kind and waits for the driver to release the memory that one took; the others stay up, because the card is shared and Strata's `--vram-reserve-mib` is what leaves room in it. Entries without that marker skip all of it, because they genuinely coexist — the voice server runs happily beside a 60 GB pack, since Whisper and Kokoro are both on the CPU.
 
 Non-interactively, for scripts or when you know what you want:
 

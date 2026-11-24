@@ -155,7 +155,13 @@ RuntimeDirectoryMode=0755
 # 'wait -n' returns when the first forwarder dies, the unit fails, and the
 # whole set comes back under Restart=always - one dead listener is repaired
 # in seconds instead of rotting quietly.
-ExecStart=/bin/bash -c 'while read -r name port; do socat "UNIX-LISTEN:/run/ai-model-bridge/${name}.sock,fork,reuseaddr,mode=0660" "TCP:127.0.0.1:${port}" & done < <(grep -Ev "^[[:space:]]*(#|$)" /etc/ai-model-bridge/services); wait -n; exit 1'
+# The loop variables are $$name/$$port, not ${name}: systemd expands $name
+# and ${name} in ExecStart from the unit's (empty) environment before bash
+# ever sees the line - quoting does not protect a dollar. $$ passes bash
+# one literal dollar, so bash reads the real loop variables. Left as $name,
+# every socat dials the same empty-named .sock and the unit exits in
+# seconds: "Referenced but unset environment variable ... name, port".
+ExecStart=/bin/bash -c 'while read -r name port; do socat "UNIX-LISTEN:/run/ai-model-bridge/$$name.sock,fork,reuseaddr,mode=0660" "TCP:127.0.0.1:$$port" & done < <(grep -Ev "^[[:space:]]*(#|$)" /etc/ai-model-bridge/services); wait -n; exit 1'
 Restart=always
 RestartSec=5
 

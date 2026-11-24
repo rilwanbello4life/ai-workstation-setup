@@ -25,7 +25,7 @@ The consequence that matters day to day: **booting Windows is a planned outage.*
 Understanding why the machine is arranged this way makes the commands below obvious rather than arbitrary.
 
 1. **The desktop.** An ordinary Ubuntu GNOME session. Holds 1–1.5 GB of VRAM just by existing.
-2. **The host services.** Strata, llama.cpp, ComfyUI and the voice server run as plain processes on the host, *outside* Kubernetes. They need direct, exclusive GPU access, and a container buys nothing for that.
+2. **The host services.** Strata, llama.cpp, ComfyUI and the voice server run as plain processes on the host, *outside* Kubernetes. They want direct access to the card rather than a container's view of it, and a container buys nothing for that.
 3. **The platform.** k3s running Postgres, LiteLLM, n8n, Open WebUI and any game servers. This is the part that stays up when you walk away.
 
 The models deliberately sit outside the cluster. The reasoning is in [server-architecture.md](server-architecture.md).

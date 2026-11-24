@@ -128,22 +128,27 @@ Add a custom OpenAI-compatible endpoint in settings pointing at `http://127.0.0.
 
 ## What can run at the same time
 
-16 GB of VRAM does not stretch far. Rough guide:
+16 GB of VRAM does not stretch far, but it is no longer one workload's to keep. Strata starts with `--vram-reserve-mib 2048` (`ubuntu/common.sh`, `STRATA_ENGINE_ARGS`), which is what hands 2 GiB of the card back to whatever else is up rather than taking all 16 GB and locking out the rest.
 
 | Combination | Works? |
 |---|---|
 | Strata + voice server (Whisper on CPU) | yes |
 | Strata + Kokoro speech | yes, Kokoro is CPU-only |
 | Strata + the server platform | yes, up to the IQ2_XS pack |
-| Strata + a small GGUF on llama.cpp | yes, at the cost of Strata's hot-expert VRAM |
-| Strata + ComfyUI image generation | no |
+| Strata + a small GGUF on llama.cpp | yes — the GGUF has to fit the room Strata was started with, 2 GiB by default |
+| Strata + the 9 GB `checker` GGUF | **no on this card.** A 9 GB GGUF and its KV leave less than Strata's own floor, so no reserve value makes the pair fit; it is a 32 GB card's pair |
+| Strata + ComfyUI image generation | only if its working set fits the room Strata leaves — at the shipped 2 GiB it does not; raise `--vram-reserve-mib` on that Strata start, or stop the language models first |
 | ComfyUI + voice server | yes, if Whisper is on CPU |
 | Strata + a game server | yes for one light server, at ~4 GB |
 | Strata + gaming | no, and RAM is the limit before VRAM is |
 
 Strata pins 25–40 GB of system RAM depending on the pack. Expect the desktop to be sluggish for 1–3 minutes while it loads.
 
-The llama.cpp row changed with the agent layer. Co-residency costs Strata roughly 9 GB of VRAM and therefore some generation speed, and it is worth it because the `checker` role needs a model with failure modes uncorrelated with the `worker`. If you are not running agents, do not pay for it.
+Two answers on two ports are a thing you can ask for now, and that is what lets a task be handed between models rather than carried between them by hand: 8080 and 8081 are both OpenAI-compatible, so LiteLLM, n8n and Open WebUI can be pointed at either while both are up. What decides is arithmetic, not policy — `--vram-reserve-mib` says how much of the card Strata never claims, and everything else has to live in that. `--kv-resident 32768` is what makes the room affordable at all: a 131072-token session costs about 1.9 GB of VRAM with the whole KV pool on the card against roughly 0.75 GB streamed, and a bigger resident KV window buys back expert slots rather than conversation memory.
+
+The reserve is a per-start choice for exactly that reason — `STRATA_VRAM_RESERVE_MIB=8192` in front of a `switch.sh strata` start hands back 8 GiB instead of 2, and what Strata gives up in exchange is its hot-expert cache, so its tokens come slower afterwards. Pay the room when a second workload is genuinely up, not on every start.
+
+Some pairs are not this card's, at any reserve. The `checker` the agent layer wants is a 9 GB `Qwen2.5-14B-Instruct-Q4_K_M` parked beside a pack ([agent-orchestration.md](agent-orchestration.md) prices that trade at Strata running on roughly 5 GB of hot-expert room instead of 14). With the GGUF and its KV resident, what is left of 16.3 GB is under what Strata needs before a single expert is placed — its slotted base, prompt buffers and a streamed session come to about 7 GB on the engine's own fit math (`vram_fit.py` inside the Strata bundle, worked through in the comment above `STRATA_ENGINE_ARGS` in `ubuntu/common.sh`). So on this box a checker is a smaller GGUF in the room you left, or the 14B run while no pack is resident, or pointing the alias at the worker and accepting errors that correlate. That pair belongs to the 32 GB card it was written for.
 
 Before anything heavy:
 
@@ -152,6 +157,8 @@ ai-status      # what is holding memory and VRAM right now
 ai-pause       # free the platform's ~15 GB
 ```
 
-A simple discipline that avoids all of this: stop one service before starting another. The launcher scripts run in the foreground, so Ctrl+C is enough.
+`ops/switch.sh` already does the careful half of that: a target stops the workload of the same kind and leaves the others up, so nothing else has to be stopped just to make room. `--stop-others` is for the card that really is full, and `switch.sh status` is the one command that says what is left on it before you find out by failing. The launcher scripts still run in the foreground, so Ctrl+C is enough.
+
+None of this happens at boot. llama.cpp and ComfyUI have no unit for the same reason a boot cannot choose which model answers; a Strata pack only comes up when `ops/up.sh --model` names one. Two live endpoints at once are both OpenAI-compatible, which is what lets a task be handed between them instead of around them.
 
 On Ubuntu, `ai-console-mode off` buys back the 1–1.5 GB of VRAM the desktop holds. Every service above is a loopback listener rather than a desktop app, so they keep running and stay reachable over SSH from another machine.

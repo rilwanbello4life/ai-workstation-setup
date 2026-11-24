@@ -128,14 +128,14 @@ If you have run phase 20 or 21, `ai-pause` does two more things. It drains the G
 | Consumer | VRAM |
 |---|---:|
 | Desktop session (GNOME, compositor) | 1–1.5 GB |
-| Strata hot experts | the rest, as much as it can get |
-| llama.cpp small model (7–14B at Q4_K_M) | ~9 GB if co-resident |
+| Strata hot experts | the rest, minus what it hands back — 2 GiB by default |
+| llama.cpp small model (7–14B at Q4_K_M) | ~9 GB, which is most of the card: resident *instead of* a pack, not beside one |
 | ComfyUI image generation | 12–15 GB |
 | A game | 8–14 GB |
 
-**Nothing in this table can share with anything else except the desktop.** The only co-residency that works is Strata plus a small llama.cpp model, and only if you accept that Strata gets ~5 GB of hot-expert space instead of ~14.
+**The desktop is the only thing that gets a share for free.** Everything else has to live in the room Strata was started with — `--vram-reserve-mib`, 2 GiB as shipped, raised per start when a second workload is genuinely up. What that room buys is a small GGUF or a quantised image pipeline. What no room buys is the 9 GB `Q4_K_M` 14B the agent layer's `checker` alias wants beside a pack: with that GGUF and its KV resident, what remains of 16.3 GB is under what Strata needs before placing a single expert, so its own fit check fails rather than the pair running thin. That pair is a 32 GB card's pair.
 
-That co-residency is deliberate, because it is what gives the agent system two independent runtimes for cross-checking. See [agent-orchestration.md](agent-orchestration.md).
+Two independent runtimes on this box therefore mean a smaller GGUF in the room you left, or the 14B while no pack is resident — and both are a deliberate choice, because an independent checker is what gives the agent system a validator that does not share the worker's blind spots. See [agent-orchestration.md](agent-orchestration.md) for the three routes and what each costs.
 
 `ai-console-mode off` drops to a text console and reclaims the desktop's 1–1.5 GB. On a headless server you would simply never start the desktop, but this machine also games, so the toggle stays.
 

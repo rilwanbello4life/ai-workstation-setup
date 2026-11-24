@@ -929,10 +929,16 @@ for entry in "${selected[@]}"; do
     fi
 
     # --yes skips prompts, --no-tui serves and returns instead of opening the
-    # monitor, --save-preset makes switching to it a one-liner later.
+    # monitor, --save-preset makes switching to it a one-liner later - and the
+    # engine settings from ubuntu/common.sh are in this call, so they end up
+    # inside the saved preset rather than only beside it: switching to this
+    # pack by hand, from the Desktop, or from ai-resume carries them without
+    # any of those paths knowing the list exists.
     rc=0
+    strata_args_for "$fam"
     "${MEM_GUARD[@]}" strata launch --family "$fam" --model "$mod" \
-                     --yes --no-tui --save-preset "$preset" || rc=$?
+                     --yes --no-tui --save-preset "$preset" \
+                     "${STRATA_ARGS[@]}" || rc=$?
 
     if (( rc == 0 )); then
         ok "${fam}/${mod} downloaded and loaded."
@@ -1021,8 +1027,13 @@ cat <<'EOF'
 
       curl http://127.0.0.1:8080/v1/models
 
-  One heavy workload at a time: 16 GB of VRAM will not hold two large models,
-  and a Flash-Next pack pins 25-30 GB of system RAM while loaded.
+  The card is shared, not handed over. Strata keeps 2 GiB of its 16 GB free
+  for other programs - enough for a quantised image model or a small GGUF
+  beside a pack, not for a second large one - and the packs were launched
+  above with that reserve and the streamed KV window from ubuntu/common.sh,
+  so the presets carry them. What bites first is usually system RAM: a
+  Flash-Next pack pins 25-62 GB of it while loaded, and the cluster's own
+  ~15 GB is on top of that.
 
   A note on speed. Both Qwen models think by default, and Flash-Next's own
   default is 'xhigh', the longest tier. A model rated 55 tok/s can spend a

@@ -261,13 +261,16 @@ PAUSE_BIN=/usr/local/bin/ai-pause
 
 # Bumped whenever the helpers below change, so that re-running this script
 # replaces an older copy instead of silently leaving it in place. Version 2
-# added Argo CD ordering and the GPU queue drain.
-HELPERS_VERSION=2
+# added Argo CD ordering and the GPU queue drain. Version 3 states the card
+# rule at the one place a Strata start is typed by hand - ai-resume's hint -
+# because the room left for a second workload is decided there, not in the
+# preset.
+HELPERS_VERSION=3
 
 write_helpers() {
     sudo tee "$PAUSE_BIN" >/dev/null <<'PAUSE_EOF'
 #!/usr/bin/env bash
-# helpers-version: 2
+# helpers-version: 3
 # Free the server platform's memory so a larger model - or a game - can have it.
 #
 #   ai-pause              scale platform workloads to zero, stop the model server
@@ -345,7 +348,7 @@ PAUSE_EOF
 
     sudo tee /usr/local/bin/ai-resume >/dev/null <<'RESUME_EOF'
 #!/usr/bin/env bash
-# helpers-version: 2
+# helpers-version: 3
 # Reverse ai-pause, restoring the replica counts it recorded.
 set -euo pipefail
 STATE=/var/lib/ai-pause
@@ -389,6 +392,13 @@ if command -v kubectl >/dev/null 2>&1; then
     restore_ns argocd
 fi
 
+# Inert as the kit ships: no phase creates a llama-server unit, and that is
+# deliberate - llama.cpp and ComfyUI are not expected to come up on boot, the
+# same reason a boot cannot choose which pack answers. This line is here for a
+# unit someone added by hand, and under the shared card such a unit is a
+# hazard: a resume that starts llama-server against a pack that kept 14 GB of
+# the card fails in a CUDA library on the way here, silently for the resume
+# (`|| true`) and deep for the loader.
 systemctl is-enabled --quiet llama-server 2>/dev/null && \
     sudo systemctl start llama-server && echo "  started llama.cpp" || true
 
@@ -396,12 +406,18 @@ echo
 echo "  Strata is not restarted automatically - choose a pack:"
 echo "      strata launch --list-presets"
 echo "      strata launch --preset <name>"
+echo "  The card is shared, not handed over: the engine settings this kit"
+echo "  installs ride inside the preset, but the room left for anything else"
+echo "  on the card is decided at this start, so a pack that is to keep a"
+echo "  GGUF or ComfyUI beside it says so here -"
+echo "      STRATA_VRAM_RESERVE_MIB=8192 strata launch --preset <name>"
+echo "  and ./ops/switch.sh status says what the card has left."
 RESUME_EOF
     sudo chmod +x /usr/local/bin/ai-resume
 
     sudo tee /usr/local/bin/ai-status >/dev/null <<'STATUS_EOF'
 #!/usr/bin/env bash
-# helpers-version: 2
+# helpers-version: 3
 # What is running, and what it is costing in memory and VRAM.
 set -uo pipefail
 

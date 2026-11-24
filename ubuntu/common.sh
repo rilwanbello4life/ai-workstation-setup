@@ -169,6 +169,175 @@ add_nvidia_repo() {
 }
 
 # ---------------------------------------------------------------------------
+# Strata's engine settings, defined once and applied at every launch.
+#
+# The channel is `--set name=value`. The Terminal CLI has first-class flags for
+# --context, --kv and --vision and nothing else; an engine setting goes through
+# --set, which the CLI layers over whatever its own setup wrote (strata_cli/
+# launch/settings.py split_setting, then tune_knobs.apply_to_argv, with
+# strata_control/user_args.py keeping a person's value over the generated one).
+# A name the engine has not heard of earns a warning rather than a refusal, so
+# every name below was checked against the engine on this box
+# (~/.local/share/strata/components/engine/0.1.66-*, whose --help lists all of
+# them) before being written here. Pasting a whole config across is the part
+# that bites: it looks correct, and half the numbers are for another card.
+#
+# Why these numbers. They came from a friend's 32 GB card, and this box is the
+# opposite shape - 16 GB of VRAM against 89 GB of system RAM - so the two
+# memories scale apart. A Flash-Next pack pins 25-62 GB of RAM while it is
+# loaded, which is why the RAM-side knobs keep the host's values and the card-
+# side ones cannot.
+#
+#   expert-cache auto     the engine sizes the hot-expert cache from whatever
+#                         the card has left after the rest of this list; Strata's
+#                         own installer writes the same word
+#   prefill auto          prompt chunks sized to the buffers that fit
+#   spec 4, spec-min-p 0.5
+#                         the draft layer's verify window and the confidence it
+#                         needs to extend it - Strata's own figures for Flash-Next
+#   kv-resident 32768     how much of the conversation memory stays on the card.
+#                         A 131072-token session costs 1.9 GB of VRAM with the
+#                         whole KV pool on the GPU against about 0.75 GB here,
+#                         and what that gives back is expert slots (vram_fit.py
+#                         prices a streamed session at max(N, floor) cells plus
+#                         a per-cell remainder). It is also what makes parallel
+#                         requests affordable at all: every batch slot is a
+#                         session of the main one's size, so an unstreamed
+#                         session has to fit three times. RAM has room for the
+#                         part that streams.
+#   vram-reserve-mib 2048 (STRATA_VRAM_RESERVE_MIB)
+#                         the slice of the card left free for other programs -
+#                         the engine's own default is 700, which is why a pack
+#                         used to own all 16 GB. This is the setting that makes
+#                         the card shared instead of handed over, and it is why
+#                         the launcher stopped insisting on one workload at a
+#                         time. Two GB holds a small GGUF or a quantised image
+#                         pipeline. The knob is overridable per start
+#                         (STRATA_VRAM_RESERVE_MIB) because on a 32 GB card the
+#                         right answer is a much bigger room, and handing back
+#                         10 GB on every start here would buy Strata experts it
+#                         then never had a second model to make room for.
+#
+#                         What cannot be bought by raising it here: the 9 GB
+#                         Q4_K_M 14B the agent layer parks beside a pack as its
+#                         `checker` (models/MANIFEST.md, LiteLLM's `checker`
+#                         alias). Once that GGUF is up, what is left of 16 GB
+#                         is under what Strata's own slotted base, prompt
+#                         buffers and a streamed session need before a single
+#                         expert is placed - vram_fit.py's own terms put that
+#                         floor at 4990 + 110 + 1522 MiB plus about 0.45 GB of
+#                         streamed KV, and a 9 GB GGUF and its own KV leave
+#                         less than the floor. So no reserve value makes the
+#                         pair fit on this card; it is a 32 GB card's pair.
+#                         Two
+#                         answers on this box mean a smaller GGUF in the room
+#                         you left, or the 14B while no pack is resident.
+#   conversation-cache-mib 8192, slots 4, min-free-mib 8192
+#                         parked conversations, which live in RAM: the engine
+#                         takes a budget sized from free RAM up to 8192, four
+#                         slots, and a 2560 MiB floor. The budget and the slots
+#                         are the host's numbers, and they are already this
+#                         engine's defaults. The floor is half his, because the
+#                         figure that matters is MemAvailable with a pack
+#                         resident - nearer 20 GB here than the 89 GB total.
+#
+# Two of his settings are deliberately absent:
+#   --vision on        his card takes the picture path; ours stays on the CPU
+#                      path, which is what keeps the card free for the other
+#                      workloads. Every preset here already carries
+#                      --vision cpu, and a launch that wants pictures can say
+#                      --vision gpu for itself.
+#   --batch-mtp        batching is opt-in and every slot is a whole session
+#                      (roughly 0.75 GB of the card each at the KV window above),
+#                      so the Desktop's own rule - auto only on a card of 24 GB
+#                      or more - is left to stand. Say --parallel 2 --set
+#                      batch-mtp=on if you want to pay for it.
+#   --max-context      his 500000 is above the 256K this model was trained on,
+#                      where the CLI warns that answers get less reliable and
+#                      rope scaling has to be switched on. The packs on this box
+#                      sit at 131072 by setup's own choice; 262144 is the top of
+#                      the trained range and the arithmetic above still fits it,
+#                      so raise it per pack (`strata launch --preset NAME
+#                      --context 262144`) rather than for everything at once.
+
+# Overridable per start rather than per install, because the number is a claim
+# about what else runs on the card, and only the person starting it knows that:
+# STRATA_VRAM_RESERVE_MIB=8192 strata launch --preset NAME ...
+# The override is a room, not a licence - what you ask for has to fit in it, and
+# the 9 GB checker GGUF above has no room that does on this card.
+STRATA_VRAM_RESERVE_MIB="${STRATA_VRAM_RESERVE_MIB:-2048}"
+
+STRATA_ENGINE_ARGS=(
+    --set expert-cache=auto
+    --set prefill=auto
+    --set spec=4
+    --set spec-min-p=0.5
+    --set kv-resident=32768
+    --set "vram-reserve-mib=${STRATA_VRAM_RESERVE_MIB}"
+    --set conversation-cache-mib=8192
+    --set conversation-cache-slots=4
+    --set conversation-cache-min-free-mib=8192
+)
+
+# The control vectors are a model-shaped setting, not a card-shaped one: they
+# ride on the speed-projection GGUF the terminal bundle ships for the Flash-
+# Next families, under data/experimental-speed-projection/ beside the
+# installed version, and the layer range 4..44 is that architecture's 48
+# layers. A Qwen3.6 pack is a different model with different layers, so the
+# trio is skipped for it rather than aimed at it blind - and the whole block is
+# skipped when the bundle has no such file, which is what a launch does on a
+# machine whose bundle predates the feature.
+#
+# Resolve the path rather than store it: it sits under the versioned terminal
+# directory, and 'current' is the indirection that keeps it true across an
+# update. Takes a preset name or a family name; leaves the arguments for that
+# one launch in STRATA_ARGS.
+#
+# What the trio is allowed to aim at comes out of the file's own name, not out
+# of a list of families: the bundle names the asset after the architecture it
+# was fitted on, and `strata models list` prints the architecture in the model
+# id (qwen3.8-flash-next-unsloth-ud-iq4_xs beside qwen3.6-35b-a3b-q8_0), where
+# the preset name does not carry it - 'qwen-iq3_s' is Flash-Next and 'qwen36-
+# q8_0' is not. So the key is matched into the catalogue and the trio ships
+# only when every pack that key could resolve to is of that architecture. A
+# key the catalogue does not know gets no vectors, which is the same reason a
+# key that straddles two architectures gets none: aiming vectors at the wrong
+# layer count is silent, not an error.
+strata_args_for() {
+    local key="${1,,}"
+    local esp esp_arch hits
+    STRATA_ARGS=("${STRATA_ENGINE_ARGS[@]}")
+    esp="$(ls -1 "$HOME/.local/share/strata/terminal/current/data/experimental-speed-projection/"*.gguf 2>/dev/null | head -n1)"
+    [[ -n "$esp" ]] || return 0
+    esp_arch="${esp##*/}"
+    esp_arch="${esp_arch,,}"
+    esp_arch="${esp_arch%%-experimental-*}"
+    [[ -n "$key" ]] || return 0
+    # The catalogue's first field is not always the preset's own name - the
+    # qwen family is listed as 'iq3_s' while the preset is 'qwen-iq3_s' - so
+    # match on the whole name or on its quant part, and let the all-of-one-
+    # architecture rule below decide what a loose match cost.
+    hits="$(strata models list 2>/dev/null | tr 'A-Z' 'a-z' \
+            | grep -F -e "$key" -e "${key#*-}" | cut -d' ' -f3-)" || true
+    # Counted rather than grepped -v, because -v on this box's grep is the
+    # version flag, and it reports success on a file that agrees completely.
+    local total=0 wrong=0 line
+    while IFS= read -r line; do
+        [[ -n "$line" ]] || continue
+        total=$(( total + 1 ))
+        [[ "$line" == *"$esp_arch"* ]] || wrong=$(( wrong + 1 ))
+    done <<< "$hits"
+    if (( total && wrong == 0 )); then
+        STRATA_ARGS+=(
+            "--set" "control-vector-scaled=${esp}:1.0"
+            "--set" "control-vector-layer-range=4 44"
+            "--set" "cvec-mode=project"
+            "--set" "cvec-dir=per-layer"
+        )
+    fi
+}
+
+# ---------------------------------------------------------------------------
 # One file owns the interactive shell environment, and both ~/.profile and
 # ~/.bashrc source it.
 #

@@ -17,9 +17,12 @@
 #   2. Waiting for the API. k3s needs 30-60 seconds after boot before it
 #      answers, and anything that asks sooner fails in a way that reads as
 #      broken rather than early.
-#   3. The model servers. Strata, llama.cpp and ComfyUI have no units on
-#      purpose: 16 GB of VRAM holds one of them at a time, so which one runs
-#      is a decision, not a default. This script will not pick for you.
+#   3. The model servers. None of them gets a unit: which one answers is a
+#      decision a boot cannot make for you, and only Strata is started here,
+#      and only when --model names a pack by hand. llama.cpp and ComfyUI stay
+#      off boot on purpose even though the card can now hold them beside a
+#      pack - they are ops/switch.sh's to start when you want them, not
+#      something that wakes up at 06:00 and quietly eats the reserve.
 #
 # Safe to run at any time, as often as you like. It starts nothing that is
 # already running.
@@ -184,7 +187,11 @@ if [[ -n "$MODEL" ]]; then
     have strata || die "strata is not installed. Run ubuntu/07-strata.sh --install."
     info "Launching Strata preset '$MODEL'."
     info "Expect the machine to be sluggish for 1-3 minutes while it loads."
-    if strata launch --preset "$MODEL" --yes --no-tui; then
+    # The engine settings for this card (ubuntu/common.sh) go on the command
+    # line as well as into the preset, so the pack that boots is the pack that
+    # was sized for 16 GB even when the preset was saved before this existed.
+    strata_args_for "$MODEL"
+    if strata launch --preset "$MODEL" --yes --no-tui "${STRATA_ARGS[@]}"; then
         ok "Strata is serving on http://127.0.0.1:8080/v1"
     else
         err "Strata failed to launch. Check the preset name:"
@@ -194,7 +201,9 @@ if [[ -n "$MODEL" ]]; then
 elif have strata && strata launch --status >/dev/null 2>&1; then
     ok "Strata is already serving."
 else
-    info "No model server is running. One heavy workload at a time:"
+    info "No model server is running. The card can hold more than one now -"
+    info "Strata keeps 2 GiB of its 16 GB free for the others - so start what"
+    info "you want, and read 'switch.sh status' for what the card has left:"
     info "    ./ops/switch.sh strata <preset>     the big MoE packs"
     info "    ./ops/switch.sh llamacpp <file>     a small fast GGUF"
     info "    ./ops/switch.sh comfyui             image and video"

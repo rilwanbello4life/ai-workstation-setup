@@ -702,7 +702,7 @@ Nothing is rebound and no port is opened — `tailscale serve` listens on the Ta
 
 All loopback-only and **none has authentication** — never expose them to the network.
 
-The standing constraint: 16 GB of VRAM means **one heavy workload at a time**. Strata and ComfyUI cannot share the GPU. Strata alone pins 25–60 GB of RAM depending on the pack, so nothing else heavy runs alongside it either.
+The card is shared, not handed over: Strata starts with `--vram-reserve-mib` and keeps 2 GiB of its 16 GB unclaimed, which is the room a small GGUF or a quantised image pipeline lives in beside a pack — not SDXL at full precision, and not the 9 GB `Qwen2.5-14B-Instruct-Q4_K_M` the `checker` role wants there. **No reserve value fits that pair on this card**: a resident 9 GB GGUF and its own KV leave less than Strata needs before placing one expert, so the raise is not a smaller room, it is a bigger card. Here a checker is a smaller GGUF in the room you left, or the 14B run while no pack is resident. `ops/switch.sh status` is the command that says what the card has left before a start finds out by failing inside a CUDA library. `ops/switch.sh` stops the workload of the same kind and leaves the others up; `--stop-others` is for when the card really is full. Strata alone still pins 25–60 GB of RAM depending on the pack, so system RAM is usually what bites first.
 
 If you are going on to build the server platform, continue with [manual-server.md](manual-server.md). Note that it takes about 15 GB of RAM permanently, which caps the resident Strata pack at IQ2_XS while it runs.
 
