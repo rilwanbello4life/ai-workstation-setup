@@ -1,18 +1,265 @@
-# In-cluster DNS names for the model servers that run on the host.
+# Reaching the services that run on the host, without hardcoding an address.
 #
 # Strata mlocks 25-30 GB, owns the GPU and takes 1-3 minutes to load, so it
-# stays outside Kubernetes. Pods still need a stable address for it, and
-# hardcoding an IP into every workload is how you end up unable to move
-# anything. A Service with no selector plus a hand-written EndpointSlice gives
-# normal cluster DNS pointing at the host.
+# stays outside Kubernetes. Pods still need stable names for it and for
+# llama.cpp, the voice server, the GPU probe, ComfyUI and the git daemon.
 #
-# ${HOST_IP} is substituted by server/02-k3s.sh with the cni0 gateway address,
-# normally 10.42.0.1. The socat bridge in ai-model-bridge.service forwards that
-# address to 127.0.0.1, so the services themselves never leave loopback and
-# stay invisible to the LAN.
+# This file changed, and the reason matters. The first version gave each
+# Service no selector and hand-wrote an EndpointSlice pointing at 10.42.0.1 -
+# the cni0 gateway - with a host socat unit forwarding that address into
+# 127.0.0.1. It worked right up until the forwarding unit died while
+# systemd still reported it healthy: the unit was Type=oneshot, and a shell
+# whose every socat failed to bind still exits 0. It sat there "active
+# (exited)" with nothing listening, every host-backed name in the cluster
+# went dead, and both health checks - which asked systemd, not the sockets -
+# said fine. The failure was also baked into the cluster's desired state:
+# 10.42.0.1 is just whatever pod CIDR k3s happened to come up with, so a
+# k3s reinstall, a CNI change, or a second node with a different CIDR meant
+# a coordinated edit of manifests, chart values and systemd units.
 #
-# A Service with no selector gets no automatic endpoints, which is exactly why
-# this works - we supply them ourselves.
+# Now: the Services are ordinary selector Services, and their endpoints are
+# pods of the DaemonSet below. Each container is one socat, in normal pod
+# network, listening on the same port the old cni0 bridge used and dialing a
+# unix socket in /run/ai-model-bridge. The host unit - ai-model-bridge
+# service v2, installed by server/02-k3s.sh - owns those sockets and
+# forwards them to 127.0.0.1. No IP appears anywhere: a pod cannot dial a
+# host loopback address, but it can dial a socket file the host published
+# into a directory the pod mounts, and loopback never has to be exposed to
+# the LAN. Cluster CIDRs can move freely.
+#
+# Because the port numbers are unchanged, no in-cluster URL changes:
+# strata stays http://strata.platform.svc.cluster.local:8080/v1. A pod's
+# 8080 does not collide with Strata's 127.0.0.1:8080 - different network
+# namespaces.
+#
+# The missing readiness probe is deliberate. When the host socket is absent
+# the socat still accepts and then drops each connection, so a client gets a
+# connection refused: the true error, naming the real problem. A probe would
+# pull the endpoint instead and turn that into "no endpoints available",
+# which sends everyone debugging it looking at Kubernetes instead of at the
+# host service that is actually down.
+#
+# Three lists must agree on the same set of services: the containers below,
+# the chart's values.hostServices, and /etc/ai-model-bridge/services on the
+# host. The scripts that install each piece write all three; see
+# host_model_bridge_add in server/common.sh.
+
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: host-model-proxy
+  namespace: platform
+  labels:
+    app.kubernetes.io/name: host-model-proxy
+    app.kubernetes.io/component: host-bridge
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: host-model-proxy
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: host-model-proxy
+        app.kubernetes.io/component: host-bridge
+    spec:
+      # The sockets only exist where the host unit runs. Without this label
+      # the pod would schedule onto a node with no bridge and serve nothing
+      # but refusals; with it, a second node that runs no host models simply
+      # grows no proxy. server/02-k3s.sh applies the label.
+      nodeSelector:
+        ai.workstation/host-models: "true"
+      # Single-node k3s puts the control-plane role on the only node, and
+      # builds that taint it would otherwise keep this DaemonSet empty.
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        # One container per host service, so a saturated or crashing forward
+        # takes down its own name and nothing else.
+        - name: strata
+          image: alpine/socat:1.8.0.0
+          command: ["socat"]
+          args:
+            - "TCP-LISTEN:8080,fork,reuseaddr"
+            - "UNIX-CONNECT:/run/ai-model-bridge/strata.sock"
+          ports:
+            - name: strata
+              containerPort: 8080
+              protocol: TCP
+          volumeMounts:
+            - name: bridge-sockets
+              mountPath: /run/ai-model-bridge
+              readOnly: true
+          # The sockets are root-owned at 0660, so dialing them needs uid 0.
+          # That is all it needs: every port here is unprivileged and the
+          # container keeps no capabilities at all. The mount is read-only -
+          # connecting to an existing socket works over a read-only bind,
+          # creating or replacing one does not, so a compromised socat
+          # cannot plant a socket under someone else's name.
+          securityContext:
+            runAsUser: 0
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          # The platform namespace has a ResourceQuota (platform-ceiling)
+          # that rejects containers declaring no resources, so numbers are
+          # mandatory. These are static binaries pushing bytes; the limits
+          # are headroom, not need.
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 200m
+              memory: 64Mi
+        - name: llamacpp
+          image: alpine/socat:1.8.0.0
+          command: ["socat"]
+          args:
+            - "TCP-LISTEN:8081,fork,reuseaddr"
+            - "UNIX-CONNECT:/run/ai-model-bridge/llamacpp.sock"
+          ports:
+            - name: llamacpp
+              containerPort: 8081
+              protocol: TCP
+          volumeMounts:
+            - name: bridge-sockets
+              mountPath: /run/ai-model-bridge
+              readOnly: true
+          securityContext:
+            runAsUser: 0
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 200m
+              memory: 64Mi
+        - name: voice
+          image: alpine/socat:1.8.0.0
+          command: ["socat"]
+          args:
+            - "TCP-LISTEN:8100,fork,reuseaddr"
+            - "UNIX-CONNECT:/run/ai-model-bridge/voice.sock"
+          ports:
+            - name: voice
+              containerPort: 8100
+              protocol: TCP
+          volumeMounts:
+            - name: bridge-sockets
+              mountPath: /run/ai-model-bridge
+              readOnly: true
+          securityContext:
+            runAsUser: 0
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 200m
+              memory: 64Mi
+        # 8101 and 8188 used to be bolted on by re-writing the host unit
+        # from a second script - the drift this design removes. They live
+        # here from the start; server/09-gpu-queue.sh only checks the
+        # sockets exist.
+        - name: gpu-probe
+          image: alpine/socat:1.8.0.0
+          command: ["socat"]
+          args:
+            - "TCP-LISTEN:8101,fork,reuseaddr"
+            - "UNIX-CONNECT:/run/ai-model-bridge/gpu-probe.sock"
+          ports:
+            - name: gpu-probe
+              containerPort: 8101
+              protocol: TCP
+          volumeMounts:
+            - name: bridge-sockets
+              mountPath: /run/ai-model-bridge
+              readOnly: true
+          securityContext:
+            runAsUser: 0
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 200m
+              memory: 64Mi
+        - name: comfyui
+          image: alpine/socat:1.8.0.0
+          command: ["socat"]
+          args:
+            - "TCP-LISTEN:8188,fork,reuseaddr"
+            - "UNIX-CONNECT:/run/ai-model-bridge/comfyui.sock"
+          ports:
+            - name: comfyui
+              containerPort: 8188
+              protocol: TCP
+          volumeMounts:
+            - name: bridge-sockets
+              mountPath: /run/ai-model-bridge
+              readOnly: true
+          securityContext:
+            runAsUser: 0
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 200m
+              memory: 64Mi
+        # The git daemon moves to loopback alongside the model servers;
+        # server/08-gitops.sh appends "gitops 9418" to the host unit's
+        # list. This is the last ${HOST_IP} consumer in the kit - with it
+        # gone, nothing on the box needs to know the pod CIDR at all.
+        - name: gitops
+          image: alpine/socat:1.8.0.0
+          command: ["socat"]
+          args:
+            - "TCP-LISTEN:9418,fork,reuseaddr"
+            - "UNIX-CONNECT:/run/ai-model-bridge/gitops.sock"
+          ports:
+            - name: gitops
+              containerPort: 9418
+              protocol: TCP
+          volumeMounts:
+            - name: bridge-sockets
+              mountPath: /run/ai-model-bridge
+              readOnly: true
+          securityContext:
+            runAsUser: 0
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 200m
+              memory: 64Mi
+      volumes:
+        - name: bridge-sockets
+          hostPath:
+            path: /run/ai-model-bridge
+            # 'Directory', not 'DirectoryOrCreate': a node without the host
+            # unit should leave the pod Pending with a plain explanation,
+            # not quietly grow an empty directory and forward nothing.
+            type: Directory
+---
 apiVersion: v1
 kind: Service
 metadata:
@@ -22,29 +269,15 @@ metadata:
     description: "Strata on the host - whichever pack is currently launched"
 spec:
   type: ClusterIP
+  # An ordinary selector now: the endpoints are proxy pods, maintained by
+  # the endpoint controller, disappearing exactly when the pod does.
+  selector:
+    app.kubernetes.io/name: host-model-proxy
   ports:
     - name: http
       port: 8080
       targetPort: 8080
       protocol: TCP
----
-apiVersion: discovery.k8s.io/v1
-kind: EndpointSlice
-metadata:
-  name: strata-host
-  namespace: platform
-  labels:
-    kubernetes.io/service-name: strata
-addressType: IPv4
-ports:
-  - name: http
-    port: 8080
-    protocol: TCP
-endpoints:
-  - addresses:
-      - "${HOST_IP}"
-    conditions:
-      ready: true
 ---
 apiVersion: v1
 kind: Service
@@ -55,29 +288,13 @@ metadata:
     description: "llama.cpp on the host - small model held in VRAM"
 spec:
   type: ClusterIP
+  selector:
+    app.kubernetes.io/name: host-model-proxy
   ports:
     - name: http
       port: 8081
       targetPort: 8081
       protocol: TCP
----
-apiVersion: discovery.k8s.io/v1
-kind: EndpointSlice
-metadata:
-  name: llamacpp-host
-  namespace: platform
-  labels:
-    kubernetes.io/service-name: llamacpp
-addressType: IPv4
-ports:
-  - name: http
-    port: 8081
-    protocol: TCP
-endpoints:
-  - addresses:
-      - "${HOST_IP}"
-    conditions:
-      ready: true
 ---
 apiVersion: v1
 kind: Service
@@ -88,26 +305,10 @@ metadata:
     description: "Whisper + Kokoro voice server on the host"
 spec:
   type: ClusterIP
+  selector:
+    app.kubernetes.io/name: host-model-proxy
   ports:
     - name: http
       port: 8100
       targetPort: 8100
       protocol: TCP
----
-apiVersion: discovery.k8s.io/v1
-kind: EndpointSlice
-metadata:
-  name: voice-host
-  namespace: platform
-  labels:
-    kubernetes.io/service-name: voice
-addressType: IPv4
-ports:
-  - name: http
-    port: 8100
-    protocol: TCP
-endpoints:
-  - addresses:
-      - "${HOST_IP}"
-    conditions:
-      ready: true

@@ -6,15 +6,20 @@
 
 namespace: platform
 
-# The address pods use to reach services running on the host. This is the
-# cni0 gateway, and it replaces the ${HOST_IP} envsubst substitution that
-# server/02-k3s.sh used to perform before applying 03-host-models.yaml.
-#
-# Written by server/08-gitops.sh at install time. If the cluster is ever
-# rebuilt with a different pod CIDR, this is the one value to change.
-hostIP: "10.42.0.1"
-
 # Host services reached through cluster DNS. Ports match reference/ports.md.
+#
+# Each name below is an ordinary selector Service backed by a socat pod in
+# the host-model-proxy DaemonSet (templates/host-models.yaml), which dials a
+# unix socket the host unit publishes in hostProxy.socketDir. No host
+# address is involved anywhere - that is the whole point. The previous
+# version of this file carried a hostIP value and hand-wrote EndpointSlices
+# at it, and the box went dark the moment the forwarding unit died while
+# systemd still reported it active; a different pod CIDR would have broken
+# it just as quietly.
+#
+# Every entry here needs a matching line in /etc/ai-model-bridge/services
+# on the host (server/common.sh, host_model_bridge_add) or the proxy will
+# accept connections and drop them - a visible failure, not a silent one.
 hostServices:
   strata:
     port: 8080
@@ -25,6 +30,27 @@ hostServices:
   voice:
     port: 8100
     description: "Whisper + Kokoro voice server on the host"
+  gpu-probe:
+    port: 8101
+    description: "nvidia-smi as JSON - utilisation and free VRAM, read-only"
+  comfyui:
+    port: 8188
+    description: "ComfyUI on the host - batch image and video jobs"
+  gitops:
+    port: 9418
+    portName: git
+    description: "Bare git repo on the host - the source of truth Argo CD reads"
+
+# The proxy DaemonSet's own settings.
+hostProxy:
+  image: alpine/socat:1.8.0.0
+  # Where ai-model-bridge.service v2 puts its sockets, and what the DaemonSet
+  # hostPath-mounts read-only.
+  socketDir: /run/ai-model-bridge
+  # Only nodes that actually run the host unit get a proxy pod; the label is
+  # applied by server/02-k3s.sh.
+  nodeSelector:
+    ai.workstation/host-models: "true"
 
 postgres:
   image: postgres:16-alpine

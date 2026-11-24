@@ -239,33 +239,43 @@ Volumes live on `/srv` rather than under k3s's own storage directory, so there i
 
 Pods need a stable name for services running on the host. Strata cannot move into the cluster — it `mlock`s 25–30 GB, owns the GPU and takes minutes to load.
 
+Nothing here involves an address any more. The cluster side is plain YAML — no `envsubst`, no `${HOST_IP}`, nothing that a rebuilt pod CIDR could stale:
+
 ```bash
-export HOST_IP="$(ip -4 addr show cni0 | awk '/inet /{print $2}' | cut -d/ -f1 | head -n1)"
-echo "$HOST_IP"     # normally 10.42.0.1
-envsubst < server/k8s/03-host-models.yaml | kubectl apply -f -
+kubectl label node "$(kubectl get nodes -o name | head -n1)" \
+    ai.workstation/host-models=true --overwrite
+kubectl apply -f server/k8s/03-host-models.yaml
 ```
 
-That creates selector-less Services with hand-written EndpointSlices pointing at the host.
+That creates the `host-model-proxy` DaemonSet — one `socat` container per host service, dialing a unix socket in `/run/ai-model-bridge` — and ordinary selector Services for `strata`, `llamacpp`, `voice`, `gpu-probe`, `comfyui` and `gitops`, all on the same port numbers as before.
 
-Strata still binds only to `127.0.0.1`, so pods cannot reach it yet. Rather than rebinding it to `0.0.0.0` — which would expose an unauthenticated model server to your LAN — forward just the cni0 address into loopback:
+The sockets come from a host unit. Strata binds only to `127.0.0.1` and will go on doing so — rebinding it to `0.0.0.0` would expose an unauthenticated model server to your LAN — and a pod cannot dial a host loopback address, but it can dial a socket file the host publishes where the pod can see it:
 
 ```bash
 sudo apt-get install -y socat
-sudo tee /etc/systemd/system/ai-model-bridge.service >/dev/null <<EOF
+sudo mkdir -p /etc/ai-model-bridge
+sudo tee /etc/ai-model-bridge/services >/dev/null <<'LIST'
+strata 8080
+llamacpp 8081
+voice 8100
+gpu-probe 8101
+comfyui 8188
+gitops 9418
+LIST
+sudo tee /etc/systemd/system/ai-model-bridge.service >/dev/null <<'EOF'
 [Unit]
-Description=Forward cluster-facing ports to loopback model servers
+# ai-model-bridge v2
+Description=Expose host loopback services to the cluster over unix sockets
 After=k3s.service
 Wants=k3s.service
 
 [Service]
-Type=oneshot
-RemainAfterExit=yes
-ExecStart=/bin/sh -c '\\
-  socat TCP-LISTEN:8080,bind=$HOST_IP,fork,reuseaddr TCP:127.0.0.1:8080 & \\
-  socat TCP-LISTEN:8081,bind=$HOST_IP,fork,reuseaddr TCP:127.0.0.1:8081 & \\
-  socat TCP-LISTEN:8100,bind=$HOST_IP,fork,reuseaddr TCP:127.0.0.1:8100 & \\
-  wait'
-ExecStop=/usr/bin/pkill -f "socat TCP-LISTEN:80(80|81)|socat TCP-LISTEN:8100"
+Type=simple
+RuntimeDirectory=ai-model-bridge
+RuntimeDirectoryMode=0755
+ExecStart=/bin/bash -c 'while read -r name port; do socat "UNIX-LISTEN:/run/ai-model-bridge/${name}.sock,fork,reuseaddr,mode=0660" "TCP:127.0.0.1:${port}" & done < <(grep -Ev "^[[:space:]]*(#|$)" /etc/ai-model-bridge/services); wait -n; exit 1'
+Restart=always
+RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
@@ -275,7 +285,11 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now ai-model-bridge.service
 ```
 
-Pods can now reach `http://strata.platform.svc.cluster.local:8080/v1` and friends.
+Do not revive the old `Type=oneshot` unit: its shell exited 0 even when every `socat` failed to bind, so systemd reported a dead bridge as healthy — that silent failure is what this unit exists to replace. `Type=simple` plus `wait -n` means the unit dies when its forwarders do and `Restart=always` repairs it.
+
+This is exactly what `host_model_bridge_add` and `host_model_node_label` in `server/common.sh` do; running `./02-k3s.sh` does it for you and appends `gitops 9418` arrives via `./08-gitops.sh`.
+
+Pods can now reach `http://strata.platform.svc.cluster.local:8080/v1` and friends. If a name fails: `ls /run/ai-model-bridge` (is the forwarder there), `kubectl -n platform get ds host-model-proxy` (is the proxy pod ready), then `curl http://127.0.0.1:8080/v1/models` (is the service itself up).
 
 ---
 
@@ -575,7 +589,7 @@ If that returns text, every layer in this document is wired correctly.
 | Symptom | Likely cause |
 |---|---|
 | Pods `Pending` | ResourceQuota, or no memory. `kubectl -n platform describe pod <name>` |
-| Pod cannot reach a model | `ai-model-bridge` not running, or Strata is not loaded |
+| Pod cannot reach a model | Strata not loaded, or no socket in `/run/ai-model-bridge` (bridge unit down) |
 | `kubectl` permission denied | `KUBECONFIG` unset in this shell |
 | LiteLLM 500s on start | Still running database migrations; wait and check the logs |
 | n8n credentials unreadable | The encryption key changed. This is unrecoverable |

@@ -416,8 +416,29 @@ if unit_on k3s; then
 else
     miss "k3s" "run server/02-k3s.sh"
 fi
-unit_on ai-model-bridge.service && ok "ai-model-bridge.service" "host models reachable from pods" \
-    || miss "ai-model-bridge.service" "part of server/02-k3s.sh"
+if unit_on ai-model-bridge.service; then
+    # 'systemctl is-active' once called a dead bridge healthy: v1 was
+    # Type=oneshot and its shell exited 0 even when every socat failed to
+    # bind. Check what traffic actually uses - the socket on the host and
+    # the proxy pod in the cluster - rather than what the unit reports.
+    if [[ -S /run/ai-model-bridge/strata.sock ]]; then
+        ok "ai-model-bridge.service" "socket present, forwarders listening"
+    else
+        bad "ai-model-bridge.service" "active but no /run/ai-model-bridge/strata.sock"
+    fi
+    proxy="$(kc get ds host-model-proxy -n platform \
+             -o custom-columns=':status.numberReady,:status.desiredNumberScheduled' \
+             --no-headers 2>/dev/null | tr -d '[:space:]')"
+    case "$proxy" in
+        "")   miss "host-model-proxy" "DaemonSet not applied - re-run server/02-k3s.sh" ;;
+        0/0)  warn "host-model-proxy" "no node labelled for host models" ;;
+        */0)  warn "host-model-proxy" "no node labelled for host models" ;;
+        0/*)  bad  "host-model-proxy" "proxy pod not ready - host-backed names are dead" ;;
+        *)    ok   "host-model-proxy" "$proxy proxy pods ready" ;;
+    esac
+else
+    miss "ai-model-bridge.service" "part of server/02-k3s.sh"
+fi
 
 # =========================================================================
 sec "Phase 14 - Platform services"
@@ -609,13 +630,17 @@ else
     miss "gpu-probe.service" "optional - the queue falls back to static limits"
 fi
 
-# The bridge has to cover the probe and ComfyUI or the pod cannot see them.
-if [[ -f /etc/systemd/system/ai-model-bridge.service ]]; then
-    if grep -q 'TCP-LISTEN:8101' /etc/systemd/system/ai-model-bridge.service; then
-        ok "host bridge" "covers 8101 and 8188"
-    else
-        miss "host bridge" "predates phase 21 - re-run server/09-gpu-queue.sh"
-    fi
+# The queue reaches the probe and ComfyUI through the same bridge. A socket
+# file proves the forwarder exists; whether the host service behind it is
+# up is a separate, honest question the probe check above already answers.
+if [[ -d /run/ai-model-bridge ]]; then
+    for sock in gpu-probe comfyui; do
+        [[ -S "/run/ai-model-bridge/${sock}.sock" ]] \
+            && ok "host bridge" "socket present for ${sock}" \
+            || miss "host bridge" "no socket for ${sock} - re-run server/02-k3s.sh"
+    done
+else
+    miss "host bridge" "/run/ai-model-bridge missing - ai-model-bridge.service is not v2"
 fi
 
 if kc get deploy gpu-queue -n platform >/dev/null; then

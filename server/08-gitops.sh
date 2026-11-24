@@ -8,7 +8,8 @@
 #
 # Argo CD cannot watch a directory - it reads git, a Helm repo or OCI and
 # nothing else - so the destination has a bare repository behind it, served
-# read-only to the cluster by git-daemon on the cni0 address. A private
+# read-only to the cluster by git-daemon on loopback, reached through the
+# host-model-proxy unix socket like any other host service. A private
 # GitHub repo can be added as a push mirror, which is backup and history
 # rather than the source of truth: a dead internet connection must never be
 # able to stop a deploy on a machine sitting in the same room.
@@ -56,13 +57,6 @@ fi
 
 # ---------------------------------------------------------------------------
 section "Prerequisites"
-
-# The host address as seen from pods: the cni0 gateway, normally 10.42.0.1.
-# Same value 02-k3s.sh uses for the model services.
-HOST_IP="$(ip -4 addr show cni0 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1 | head -n1 || true)"
-[[ -n "$HOST_IP" ]] || HOST_IP="10.42.0.1"
-export HOST_IP
-info "Pods reach the host at $HOST_IP"
 
 if have helm; then
     ok "helm present ($(helm version --short 2>/dev/null))"
@@ -169,12 +163,22 @@ done < <(find "$SEED_DIR" -type f -print0)
 (( copied )) && { ok "Seeded $copied file(s) from the kit."; note_change; } \
              || ok "Charts and Applications already present."
 
-# hostIP is the one value that cannot be shipped correct, because it depends
-# on the pod CIDR this cluster came up with.
+# The platform chart used to ship the endpoint mechanism, so a box upgraded
+# from that era may still hold the version that renders hand-written
+# EndpointSlices at values.hostIP. Seeding never overwrites, so migrate the
+# two files explicitly when the old signature is present - otherwise the
+# next render hands Argo CD dead slices to defend. An existing values.yaml
+# is copied aside (gitignored as *.v1-backup) rather than silently replaced,
+# because it may carry local edits this script must not swallow.
+tpl="$GITOPS_DIR/source/platform/templates/host-models.yaml"
 values="$GITOPS_DIR/source/platform/values.yaml"
-if [[ -f "$values" ]] && ! grep -q "hostIP: \"$HOST_IP\"" "$values"; then
-    sed -i "s|^hostIP: .*|hostIP: \"$HOST_IP\"|" "$values"
-    ok "Set hostIP to $HOST_IP in the platform chart."
+if grep -q 'hostIP' "$tpl" 2>/dev/null || grep -q '^hostIP:' "$values" 2>/dev/null; then
+    if [[ -f "$values" ]] && cp -n "$values" "$values.v1-backup" 2>/dev/null; then
+        warn "Old chart values saved to $values.v1-backup - re-apply any local edits."
+    fi
+    cp "$SEED_DIR/source/platform/templates/host-models.yaml" "$tpl"
+    cp "$SEED_DIR/source/platform/values.yaml" "$values"
+    ok "Migrated the platform chart to the unix-socket host bridge."
     note_change
 fi
 
@@ -209,12 +213,25 @@ ok "origin -> $GITOPS_BARE"
 # ---------------------------------------------------------------------------
 section "git daemon"
 
+# The daemon moves off the cni0 address onto loopback and is reached from
+# the cluster through the host-model-proxy unix socket, like every other
+# host service. That removes the last address any manifest or unit in this
+# kit had to know. Order matters: append the socket to the bridge first (it
+# simply refuses connections until the daemon lands), move the daemon, then
+# apply the Service, then delete the slice the previous version hand-wrote
+# at the old host address - pruning is off, so it would otherwise keep
+# load-balancing live proxy pods against a dead one.
+host_model_bridge_add gitops 9418
+
 GIT_UNIT=/etc/systemd/system/gitops-git-daemon.service
-if [[ -f "$GIT_UNIT" ]] && grep -q "listen=$HOST_IP" "$GIT_UNIT"; then
+GIT_MARK="git-daemon v2"
+if [[ -f "$GIT_UNIT" ]] && grep -q "$GIT_MARK" "$GIT_UNIT"; then
     ok "gitops-git-daemon already installed."
 else
+    [[ -f "$GIT_UNIT" ]] && info "Rewriting gitops-git-daemon to bind loopback."
     sudo tee "$GIT_UNIT" >/dev/null <<EOF
 [Unit]
+# $GIT_MARK
 Description=Read-only git daemon serving /srv/gitops.git to the cluster
 After=k3s.service
 Wants=k3s.service
@@ -222,14 +239,16 @@ Wants=k3s.service
 [Service]
 Type=simple
 User=$USER
-# Bound to the cni0 address, never 0.0.0.0: pods can reach it, the LAN
-# cannot. No --export-all, so only repositories carrying the marker file
-# git-daemon-export-ok are served. No --enable=receive-pack, so nothing
-# reachable through this can write.
+# Loopback, never 0.0.0.0 and never the cni0 address: pods reach this
+# through the host-model-proxy unix socket, the LAN cannot reach it at all,
+# and the pod CIDR has nothing to do with it. v1 bound cni0, which made
+# this unit part of the address problem. No --export-all, so only
+# repositories carrying the marker file git-daemon-export-ok are served.
+# No --enable=receive-pack, so nothing reachable through this can write.
 ExecStart=/usr/lib/git-core/git-daemon \\
   --reuseaddr \\
   --base-path=/srv \\
-  --listen=$HOST_IP \\
+  --listen=127.0.0.1 \\
   --port=9418 \\
   $GITOPS_BARE
 Restart=always
@@ -239,12 +258,14 @@ RestartSec=5
 WantedBy=multi-user.target
 EOF
     sudo systemctl daemon-reload
-    sudo systemctl enable --now gitops-git-daemon.service
-    ok "git daemon serving git://$HOST_IP:9418/gitops.git"
+    sudo systemctl enable gitops-git-daemon.service >/dev/null 2>&1 || true
+    sudo systemctl restart gitops-git-daemon.service
+    ok "git daemon serving on 127.0.0.1:9418"
     note_change
 fi
 
 apply_manifest "$K8S_DIR/05-gitops-repo.yaml"
+host_model_prune_slices gitops
 ok "Cluster name: git://gitops.$K8S_NS.svc.cluster.local:9418/gitops.git"
 
 # ---------------------------------------------------------------------------

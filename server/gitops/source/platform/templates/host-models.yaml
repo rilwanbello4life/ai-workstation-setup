@@ -1,19 +1,111 @@
 {{- /*
-In-cluster DNS names for the model servers that run on the host.
+In-cluster DNS for the services that run on the host, driven entirely by
+values.hostServices. Each name is an ordinary selector Service backed by a
+socat container in the host-model-proxy DaemonSet below; each socat dials a
+unix socket that the host unit ai-model-bridge.service publishes in
+hostProxy.socketDir and forwards to 127.0.0.1.
 
-Strata mlocks 25-60 GB, owns the GPU and takes 1-3 minutes to load, so it
-stays outside Kubernetes. Pods still need a stable address for it. A Service
-with no selector plus a hand-written EndpointSlice gives normal cluster DNS
-pointing at the host.
+This is the second design. The first rendered a selector-less Service plus a
+hand-written EndpointSlice at .Values.hostIP - the cni0 gateway, normally
+10.42.0.1 - and a host socat unit forwarded that address into loopback. Two
+things were wrong with it. The value was a promise about the pod CIDR that
+nothing could enforce: rebuild k3s differently and the rendered slices
+pointed at an address that no longer existed. And when the host unit died
+with nothing listening, systemd still called it active (it was Type=oneshot,
+and a shell whose socats all failed to bind exits 0), so the failure was
+silent right up until n8n's assistant began erroring through LiteLLM.
 
-This replaces the envsubst substitution that server/02-k3s.sh performed on
-server/k8s/03-host-models.yaml. The host address is now .Values.hostIP, which
-is a better home for it: a value in a file Argo CD reconciles, rather than an
-environment variable that has to be correct at the moment a script runs.
+Neither failure mode exists here: no address is rendered, so a CIDR change
+cannot stale anything; the unit is Type=simple and exits when its socats do,
+so systemd sees the truth and Restart=always repairs it; and the Services'
+endpoints come from pods, so they disappear exactly when the forwarder does.
 
-A Service with no selector gets no automatic endpoints, which is exactly why
-this works - we supply them ourselves.
+The host unit reads "name port" lines from /etc/ai-model-bridge/services,
+written by host_model_bridge_add in server/common.sh. values.hostServices
+and that file must list the same services - adding one means doing both,
+plus a container here, which range gives you for free.
 */}}
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: host-model-proxy
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: host-model-proxy
+    app.kubernetes.io/component: host-bridge
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: host-model-proxy
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: host-model-proxy
+        app.kubernetes.io/component: host-bridge
+    spec:
+      # Only nodes that run the host unit can serve these sockets; a node
+      # without the label grows no proxy and stays out of the picture.
+      {{- with .Values.hostProxy.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      # Single-node k3s puts the control-plane role on the only node, and
+      # builds that taint it would otherwise keep this DaemonSet empty.
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        {{- range $name, $svc := .Values.hostServices }}
+        # One container per host service: a saturated or crashing forward
+        # takes down its own name and nothing else. No readiness probe on
+        # purpose - with the host socket missing, socat accepts and drops,
+        # and a connection refused names the real problem. Pulling the
+        # endpoint instead would report "no endpoints available" and send
+        # the next reader debugging Kubernetes.
+        - name: {{ $name }}
+          image: {{ $.Values.hostProxy.image }}
+          command: ["socat"]
+          args:
+            - "TCP-LISTEN:{{ $svc.port }},fork,reuseaddr"
+            - "UNIX-CONNECT:{{ $.Values.hostProxy.socketDir }}/{{ $name }}.sock"
+          ports:
+            - name: {{ $name }}
+              containerPort: {{ $svc.port }}
+              protocol: TCP
+          volumeMounts:
+            # Read-only: connecting to an existing socket works over a
+            # read-only bind, creating or replacing one does not, so a
+            # compromised socat cannot plant a socket under another name.
+            - name: bridge-sockets
+              mountPath: {{ $.Values.hostProxy.socketDir }}
+              readOnly: true
+          # The sockets are root-owned at 0660, so dialing them needs uid 0.
+          # Every port is unprivileged and no capabilities are kept.
+          securityContext:
+            runAsUser: 0
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          # The namespace ResourceQuota rejects containers with no declared
+          # resources. These are static binaries pushing bytes; the limits
+          # are headroom, not need.
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 200m
+              memory: 64Mi
+        {{- end }}
+      volumes:
+        - name: bridge-sockets
+          hostPath:
+            path: {{ .Values.hostProxy.socketDir }}
+            # Not DirectoryOrCreate: a node without the host unit should
+            # leave the pod Pending with a plain explanation rather than
+            # quietly grow an empty directory and forward nothing.
+            type: Directory
 {{- range $name, $svc := .Values.hostServices }}
 ---
 apiVersion: v1
@@ -25,27 +117,11 @@ metadata:
     description: {{ $svc.description | quote }}
 spec:
   type: ClusterIP
+  selector:
+    app.kubernetes.io/name: host-model-proxy
   ports:
-    - name: http
+    - name: {{ $svc.portName | default "http" }}
       port: {{ $svc.port }}
       targetPort: {{ $svc.port }}
       protocol: TCP
----
-apiVersion: discovery.k8s.io/v1
-kind: EndpointSlice
-metadata:
-  name: {{ $name }}-host
-  namespace: {{ $.Values.namespace }}
-  labels:
-    kubernetes.io/service-name: {{ $name }}
-addressType: IPv4
-ports:
-  - name: http
-    port: {{ $svc.port }}
-    protocol: TCP
-endpoints:
-  - addresses:
-      - {{ $.Values.hostIP | quote }}
-    conditions:
-      ready: true
 {{- end }}

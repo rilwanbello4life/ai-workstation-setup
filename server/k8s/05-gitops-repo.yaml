@@ -1,24 +1,27 @@
 # In-cluster DNS for the git repository that Argo CD reconciles from.
 #
-# Argo CD can read git, a Helm repository or an OCI registry. It cannot watch
-# a directory, so the "destination directory" has to have a repository behind
+# Argo CD can read git, a Helm repository or OCI. It cannot watch a
+# directory, so the "destination directory" has to have a repository behind
 # it. That repository is a bare repo on the host, served read-only by
-# git-daemon bound to the cni0 address - the same trick 03-host-models.yaml
-# uses for Strata, and for the same reason: pods need a stable name, and
-# hardcoding 10.42.0.1 into an Application is how you end up unable to move
-# anything.
-#
-# ${HOST_IP} is substituted by server/08-gitops.sh.
+# git-daemon, reached through the same host-model-proxy mechanism as the
+# model servers: an ordinary selector Service, a socat pod, a unix socket,
+# and git-daemon bound to loopback. Nothing here contains an address, which
+# is the property the previous hand-written ${HOST_IP} EndpointSlice lacked.
 #
 # Unauthenticated, deliberately. git-daemon has no auth of its own, and the
-# three things that make that acceptable are: it binds the cni0 address
-# rather than 0.0.0.0 so it is invisible to the LAN, ufw denies inbound on
-# everything except tailscale0, and the daemon is started without
-# --enable=receive-pack so nothing reachable through it can write.
+# things that make that acceptable are: it binds loopback, so only the
+# proxy pod (via the socket) and processes on this machine can reach it -
+# never the LAN; the daemon runs without --export-all, so only a repository
+# carrying the marker file git-daemon-export-ok is served, and a future git
+# repo created anywhere else under /srv is not silently published; and it
+# runs without --enable=receive-pack, so nothing reachable through it can
+# write.
 #
-# It also runs without --export-all. Only a repository containing the marker
-# file git-daemon-export-ok is served, which means a future git repo created
-# anywhere else under /srv is not silently published.
+# A note on ordering: this Service is how the cluster reaches the repository
+# the Applications point at. A brand-new cluster therefore needs 08-gitops.sh
+# to have applied this file before it creates Applications - which is the
+# order the script runs in, and why the proxy container for gitops lives in
+# 03-host-models.yaml alongside everything else rather than here.
 apiVersion: v1
 kind: Service
 metadata:
@@ -28,26 +31,10 @@ metadata:
     description: "Bare git repo on the host - the source of truth Argo CD reads"
 spec:
   type: ClusterIP
+  selector:
+    app.kubernetes.io/name: host-model-proxy
   ports:
     - name: git
       port: 9418
       targetPort: 9418
       protocol: TCP
----
-apiVersion: discovery.k8s.io/v1
-kind: EndpointSlice
-metadata:
-  name: gitops-host
-  namespace: platform
-  labels:
-    kubernetes.io/service-name: gitops
-addressType: IPv4
-ports:
-  - name: git
-    port: 9418
-    protocol: TCP
-endpoints:
-  - addresses:
-      - "${HOST_IP}"
-    conditions:
-      ready: true

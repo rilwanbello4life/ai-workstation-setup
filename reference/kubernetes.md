@@ -55,23 +55,29 @@ http://llamacpp.platform.svc.cluster.local:8081/v1
 http://voice.platform.svc.cluster.local:8100/v1
 ```
 
-Two pieces make that work, defined in [`../server/k8s/03-host-models.yaml`](../server/k8s/03-host-models.yaml):
+Three pieces make that work. The cluster side is [`../server/k8s/03-host-models.yaml`](../server/k8s/03-host-models.yaml); the host side is `ai-model-bridge.service`:
 
-1. **A Service with no selector.** Without a selector Kubernetes creates no endpoints automatically, which is the point — we supply them by hand.
-2. **An EndpointSlice pointing at the cni0 gateway**, normally `10.42.0.1`, which is the host as seen from inside a pod.
+1. **Ordinary selector Services.** Their endpoints are proxy pods, so they come and go exactly when the forwarder does.
+2. **The `host-model-proxy` DaemonSet**: one `socat` container per host service, listening on the same port number as the service and dialing a unix socket in `/run/ai-model-bridge`. A proxy pod on port 8080 does not collide with Strata's `127.0.0.1:8080` — different network namespaces.
+3. **The host unit**, which creates each socket (systemd `RuntimeDirectory`) and forwards it to `127.0.0.1`. Its port list lives in `/etc/ai-model-bridge/services`, one `name port` per line; `host_model_bridge_add` in `server/common.sh` appends to it. No script rewrites the unit, which is how the old five-port drift between `02-k3s.sh` and `09-gpu-queue.sh` happened in the first place.
 
-Then `ai-model-bridge.service` runs `socat` listeners bound *only* to that cni0 address, forwarding to `127.0.0.1`. The alternative would be rebinding Strata to `0.0.0.0`, which exposes an unauthenticated model server to the entire LAN. The bridge keeps the services on loopback while letting pods in.
+No IP address is involved in any direction. That is the replacement for a design that wrote hand-made `EndpointSlice`s at the cni0 gateway (`10.42.0.1`) and bound the `socat` listeners to that address: a pod cannot dial a host loopback address, so the slices were load-bearing, a different pod CIDR invalidated every one of them, and — the failure that actually happened — the unit was `Type=oneshot`, so a shell whose socats all failed to bind **still exited 0**. systemd reported `active (exited)` with nothing listening, every host-backed name in the cluster was dead, and both health checks said fine because they only asked systemd. v2 is `Type=simple` and exits when its forwarders do, so `Restart=always` can actually see the failure, and `status.sh` checks the socket files and the proxy pod rather than the unit's self-report.
+
+A missing socket is a designed-for case: the pod's socat still accepts and drops each connection, so a client gets a connection refused naming the real problem. There is deliberately no readiness probe — pulling endpoints would replace that with "no endpoints available" and send the next reader debugging Kubernetes instead of the host service.
+
+The loopback rule is unchanged: Strata and friends never leave `127.0.0.1`, the LAN cannot reach them, and the git daemon now binds loopback too.
 
 If pods cannot reach the models, check in this order:
 
 ```sh
-systemctl status ai-model-bridge         # is the bridge up
-ss -ltn | grep -E '8080|8081|8100'       # is anything listening on 10.42.0.1
-kubectl -n platform get endpointslices   # do the endpoints have the right IP
-ip -4 addr show cni0                     # did cni0 change address
+curl -s http://127.0.0.1:8080/v1/models        # is the model server up at all
+ls -l /run/ai-model-bridge                     # is a forwarder socket present
+systemctl status ai-model-bridge               # is the unit staying up (v2 restarts honestly)
+kubectl -n platform get ds host-model-proxy    # is the proxy pod ready
+kubectl -n platform get endpointslices -l kubernetes.io/service-name=strata
 ```
 
-The last one matters: if `cni0` ever gets a different subnet, the EndpointSlice and the socat unit both need updating. Re-running `02-k3s.sh` fixes both.
+Each line now produces an unambiguous answer. The common cause is still simply that no model is loaded; `journalctl -u ai-model-bridge` says so if a socat refuses to start.
 
 ## Resource quotas
 

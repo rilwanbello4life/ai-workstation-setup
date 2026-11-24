@@ -75,8 +75,131 @@ ram_gb() {
     echo $(( $(awk '/MemTotal/ {print $2}' /proc/meminfo) / 1024 / 1024 ))
 }
 
+# ---------------------------------------------------------------------------
+# The host side of the cluster bridge.
+#
+# Pods reach host services by dialing unix sockets in /run/ai-model-bridge.
+# The unit ai-model-bridge.service v2 owns those sockets - one socat per
+# line of /etc/ai-model-bridge/services, each "name port" exposing
+# /run/ai-model-bridge/<name>.sock forwarded to 127.0.0.1 - and the
+# host-model-proxy DaemonSet in server/k8s/03-host-models.yaml dials them
+# from inside the cluster. No host address and no cluster address appear
+# anywhere, so nothing here depends on the pod CIDR k3s happened to pick.
+#
+# The port list lives in a data file, not in ExecStart, on purpose. The
+# previous design had each script rewrite the unit to add its own ports:
+# 02-k3s.sh wrote three, 09-gpu-queue.sh rewrote the file to five, and
+# whichever ran last silently owned the truth. Appending a line has exactly
+# one winner.
+HOST_BRIDGE_DIR=/etc/ai-model-bridge
+HOST_BRIDGE_LIST=$HOST_BRIDGE_DIR/services
+HOST_BRIDGE_UNIT=/etc/systemd/system/ai-model-bridge.service
+HOST_BRIDGE_MARK="ai-model-bridge v2"
+
+# Register one host service with the bridge: append (or correct) its line in
+# the port list, install the v2 unit if this box still has v1 or nothing,
+# and restart if anything changed. Idempotent; safe from any script.
+host_model_bridge_add() {
+    local name="$1" port="$2" changed=no
+
+    [[ -n "$name" && -n "$port" ]] || die "host_model_bridge_add needs a name and a port"
+    have socat || { info "Installing socat."; sudo apt-get install -y socat >/dev/null; }
+    sudo mkdir -p "$HOST_BRIDGE_DIR"
+
+    if grep -qE "^${name}[[:space:]]" "$HOST_BRIDGE_LIST" 2>/dev/null; then
+        if [[ "$(grep -E "^${name}[[:space:]]" "$HOST_BRIDGE_LIST")" != "$name $port" ]]; then
+            sudo sed -i "s|^${name}[[:space:]].*|${name} ${port}|" "$HOST_BRIDGE_LIST"
+            changed=yes
+        fi
+    else
+        printf '%s %s\n' "$name" "$port" | sudo tee -a "$HOST_BRIDGE_LIST" >/dev/null
+        changed=yes
+    fi
+
+    if [[ -f "$HOST_BRIDGE_UNIT" ]] && grep -q "$HOST_BRIDGE_MARK" "$HOST_BRIDGE_UNIT"; then
+        if [[ "$changed" == yes ]]; then
+            sudo systemctl restart ai-model-bridge.service
+            ok "Bridge now forwards $name on port $port."
+        else
+            ok "Bridge already forwards $name on port $port."
+        fi
+        return 0
+    fi
+
+    # Either nothing is installed or the box still has v1: write v2 over
+    # whatever is there. v1 bound socats to the cni0 address and was
+    # Type=oneshot, so a unit whose every socat failed to bind exited 0 and
+    # sat "active" with nothing listening - the exact failure this replaces.
+    info "Installing ai-model-bridge v2 (unix-socket bridge)."
+    sudo tee "$HOST_BRIDGE_UNIT" >/dev/null <<'UNIT_EOF'
+[Unit]
+# ai-model-bridge v2
+Description=Expose host loopback services to the cluster over unix sockets
+After=k3s.service
+Wants=k3s.service
+
+[Service]
+# Type=simple, and the shell exits as soon as any socat does: systemd sees
+# the truth, and Restart=always keeps trying until it is true again. v1 was
+# Type=oneshot + RemainAfterExit and a shell whose socats all failed to bind
+# still exited 0, so a dead bridge reported itself healthy.
+Type=simple
+# Creates /run/ai-model-bridge on start and removes it on stop, so stale
+# sockets are never a question. 0755 so the path is readable; the sockets
+# themselves are created at 0660 by socat, and the proxy pods dial them as
+# root inside their own namespaces.
+RuntimeDirectory=ai-model-bridge
+RuntimeDirectoryMode=0755
+# One socat per line of /etc/ai-model-bridge/services, "name port". Adding a
+# host service appends a line to that file; nothing rewrites this unit.
+# 'wait -n' returns when the first forwarder dies, the unit fails, and the
+# whole set comes back under Restart=always - one dead listener is repaired
+# in seconds instead of rotting quietly.
+ExecStart=/bin/bash -c 'while read -r name port; do socat "UNIX-LISTEN:/run/ai-model-bridge/${name}.sock,fork,reuseaddr,mode=0660" "TCP:127.0.0.1:${port}" & done < <(grep -Ev "^[[:space:]]*(#|$)" /etc/ai-model-bridge/services); wait -n; exit 1'
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+UNIT_EOF
+    sudo systemctl daemon-reload
+    sudo systemctl enable ai-model-bridge.service >/dev/null 2>&1 || true
+    sudo systemctl restart ai-model-bridge.service
+    ok "Bridge active; sockets in /run/ai-model-bridge."
+}
+
+# The proxy DaemonSet only schedules on labelled nodes, so a node that runs
+# no host models never grows a proxy that forwards nothing. This kit is
+# single-node k3s: 'the node' and 'this machine' are the same thing, and
+# head -n1 reflects that.
+host_model_node_label() {
+    local node
+    node="$(kubectl get nodes -o name 2>/dev/null | head -n1)"
+    [[ -n "$node" ]] || { warn "No cluster node to label."; return 1; }
+    if kubectl label "$node" ai.workstation/host-models=true --overwrite >/dev/null 2>&1; then
+        ok "Node labelled ai.workstation/host-models=true."
+    else
+        warn "Could not label the node; host-model-proxy will not schedule."
+        return 1
+    fi
+}
+
+# Delete the hand-written EndpointSlices the pre-v2 manifests created.
+# Pruning is off in this pipeline, and an EndpointSlice no manifest mentions
+# is not garbage-collected: it would sit beside the new pod endpoints and
+# split every request between a working forwarder and the dead 10.42.0.1.
+# Pass the service names being migrated; the slices were named <name>-host.
+host_model_prune_slices() {
+    local n
+    for n in "$@"; do
+        kubectl -n "$K8S_NS" delete endpointslice "${n}-host" --ignore-not-found >/dev/null 2>&1 || true
+    done
+}
+
 # Apply a manifest, substituting ${VAR} references from the environment.
 # Keeps credentials out of the YAML files committed to this kit.
+# The host-bridge manifests no longer carry placeholders; envsubst on a
+# file with none is a no-op, so the helper stays for everything else.
 apply_manifest() {
     local file="$1"
     [[ -f "$file" ]] || die "Manifest not found: $file"

@@ -487,11 +487,12 @@ Three causes, in order of likelihood. `kubectl -n platform describe pod <name>` 
 Check in this order:
 ```bash
 curl -s http://127.0.0.1:8080/v1/models          # is the model server even up
-systemctl status ai-model-bridge                 # is the socat bridge running
-kubectl -n platform get endpointslices           # does the slice have the right IP
-ip -4 addr show cni0                             # has the host IP changed
+ls -l /run/ai-model-bridge                       # is the per-service socket there
+systemctl status ai-model-bridge                 # is the bridge unit running and staying up
+kubectl -n platform get ds host-model-proxy      # is the in-cluster proxy pod ready
+kubectl -n platform get endpointslices -l kubernetes.io/service-name=strata
 ```
-The usual cause is simply that Strata is not loaded. The second is that `cni0` got a different address after a cluster rebuild, leaving the EndpointSlice pointing at nothing — re-run `server/02-k3s.sh`.
+The usual cause is simply that Strata is not loaded. The second is that the bridge unit died — check `journalctl -u ai-model-bridge` and the port list at `/etc/ai-model-bridge/services`. A missing socket and a missing proxy pod mean the unit has not been installed (re-run `server/02-k3s.sh`, which writes both halves). Note that systemd lies in only one direction now: the unit is `Type=simple`, so `active` means the forwarders are alive, but if you restored a pre-v2 unit from backup it would be `Type=oneshot` again and could report healthy while listening on nothing — the socket file is the ground truth either way. There is no address to get wrong any more: this mechanism contains no IPs, so a cluster rebuild or pod-CIDR change cannot stale it.
 
 **LiteLLM returns 500s shortly after deploying.**
 It runs database migrations on first start. Wait, then `kubectl -n platform logs deploy/litellm`.

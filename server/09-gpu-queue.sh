@@ -43,10 +43,6 @@ kubectl -n "$K8S_NS" get deploy litellm >/dev/null 2>&1 || \
 [[ -d "$GITOPS_DIR/source" ]] || \
     die "No GitOps repo at $GITOPS_DIR. Run ./08-gitops.sh --apply first."
 
-HOST_IP="$(ip -4 addr show cni0 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1 | head -n1 || true)"
-[[ -n "$HOST_IP" ]] || HOST_IP="10.42.0.1"
-export HOST_IP
-
 # ---------------------------------------------------------------------------
 section "Schema"
 
@@ -113,46 +109,25 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-section "Host bridges"
+section "Cluster names"
 
-# ai-model-bridge forwards the cni0 address into loopback for the model
-# servers. The queue needs two more: the probe it just started, and ComfyUI
-# for batch renders.
-BRIDGE_UNIT=/etc/systemd/system/ai-model-bridge.service
-if grep -q 'TCP-LISTEN:8101' "$BRIDGE_UNIT" 2>/dev/null; then
-    ok "Bridge already covers 8101 and 8188."
-else
-    sudo tee "$BRIDGE_UNIT" >/dev/null <<EOF
-[Unit]
-Description=Forward cluster-facing ports to loopback model servers
-After=k3s.service
-Wants=k3s.service
-
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-# One socat per port. Binding only to the cni0 address keeps these services
-# invisible to the LAN while letting pods reach them.
-#   8080 Strata   8081 llama.cpp   8100 voice
-#   8101 gpu-probe (admission)     8188 ComfyUI (batch jobs)
-ExecStart=/bin/sh -c '\\
-  socat TCP-LISTEN:8080,bind=$HOST_IP,fork,reuseaddr TCP:127.0.0.1:8080 & \\
-  socat TCP-LISTEN:8081,bind=$HOST_IP,fork,reuseaddr TCP:127.0.0.1:8081 & \\
-  socat TCP-LISTEN:8100,bind=$HOST_IP,fork,reuseaddr TCP:127.0.0.1:8100 & \\
-  socat TCP-LISTEN:8101,bind=$HOST_IP,fork,reuseaddr TCP:127.0.0.1:8101 & \\
-  socat TCP-LISTEN:8188,bind=$HOST_IP,fork,reuseaddr TCP:127.0.0.1:8188 & \\
-  wait'
-ExecStop=/usr/bin/pkill -f "socat TCP-LISTEN:(8080|8081|8100|8101|8188)"
-
-[Install]
-WantedBy=multi-user.target
-EOF
-    sudo systemctl daemon-reload
-    sudo systemctl restart ai-model-bridge.service
-    ok "Bridge now covers 8080, 8081, 8100, 8101 and 8188."
-fi
+# This phase used to rewrite ai-model-bridge.service to bolt 8101 and 8188
+# onto the three ports 02-k3s.sh had written - two scripts owning one file,
+# last writer silently winning. The bridge now reads a port list that
+# 02-k3s.sh populates with both of these names already in it, so this phase
+# only checks the sockets arrived and publishes the cluster-side names.
+for sock in gpu-probe comfyui; do
+    if [[ -S "/run/ai-model-bridge/${sock}.sock" ]]; then
+        ok "Bridge socket present: ${sock}"
+    else
+        warn "No /run/ai-model-bridge/${sock}.sock - ai-model-bridge.service"
+        warn "is not running v2. Re-run server/02-k3s.sh; until then the"
+        warn "queue treats the probe as unavailable and ComfyUI is unreachable."
+    fi
+done
 
 apply_manifest "$K8S_DIR/06-gpu-probe.yaml"
+host_model_prune_slices gpu-probe comfyui
 ok "Cluster names: gpu-probe and comfyui on $K8S_NS"
 
 sudo mkdir -p "$QUEUE_DIR/outputs"

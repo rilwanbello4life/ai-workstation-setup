@@ -198,7 +198,7 @@ System-wide, in `/etc/systemd/system/`:
 | Unit | Phase | Purpose |
 |---|---|---|
 | `k3s.service` | 13 | the cluster |
-| `ai-model-bridge.service` | 13 | socat from the cni0 address to loopback, so pods reach host models |
+| `ai-model-bridge.service` | 13 | per-service socat from a `/run/ai-model-bridge` socket to loopback; port list in `/etc/ai-model-bridge/services` |
 | `platform-forward.service` | 14 | forwards 4000, 4100, 5678, 3000 and 8090 to `127.0.0.1` |
 | `cpu-performance.service` | 8.2 | pins the governor across reboots |
 | `gpu-probe.service` | 21 | the GPU JSON endpoint |

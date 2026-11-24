@@ -40,7 +40,7 @@ Three things claim 8080 and none of them collide, because only one is on the hos
 
 Neither the sandbox nor SearXNG is forwarded to `127.0.0.1`, and that is deliberate rather than an oversight. Only n8n calls either of them, and a loopback forward would put an unauthenticated code-execution API and an open search proxy next to Strata's port — both are things that get found and used by whatever else is on the machine.
 
-These run as pods, except the GPU probe and the git daemon, which are host systemd units that the cluster reaches through the cni0 bridge, and the sandbox, which is a VM reached the same way. `platform-forward.service` port-forwards 4000, 4100, 5678, 3000 and 8090 to `127.0.0.1`, which is what keeps them compatible with the `tailscale serve` map below. Postgres is deliberately not forwarded — reach it with `kubectl -n platform exec -it deploy/postgres -- psql`.
+These run as pods, except the GPU probe and the git daemon, which are host systemd units that the cluster reaches through the unix-socket host bridge, and the sandbox, which is a VM reached by an explicit EndpointSlice. `platform-forward.service` port-forwards 4000, 4100, 5678, 3000 and 8090 to `127.0.0.1`, which is what keeps them compatible with the `tailscale serve` map below. Postgres is deliberately not forwarded — reach it with `kubectl -n platform exec -it deploy/postgres -- psql`.
 
 **Ports 4000 and 4100 are the ones that change the security model.** Everything else on this page is unauthenticated and therefore loopback-only forever. LiteLLM has real keys with budgets and rate limits; the queue forwards those same keys to it rather than replacing them, so both are safe to share. See [sharing-with-friends.md](sharing-with-friends.md).
 
@@ -82,7 +82,7 @@ http://postgres.platform.svc.cluster.local:5432
 git://gitops.platform.svc.cluster.local:9418/gitops.git
 ```
 
-Everything above that points at a host process — the model servers, the probe, ComfyUI and the git daemon — is a selector-less Service backed by a hand-written EndpointSlice pointing at the cni0 gateway, with `ai-model-bridge.service` forwarding that address into loopback. Strata itself never leaves `127.0.0.1`. The mechanism is explained in [kubernetes.md](kubernetes.md).
+Everything above that points at a host process — the model servers, the probe, ComfyUI and the git daemon — is an ordinary selector Service backed by a `socat` pod in the `host-model-proxy` DaemonSet, which dials a unix socket under `/run/ai-model-bridge`; `ai-model-bridge.service` on the host forwards each socket to `127.0.0.1`. No IP address is involved in the path, and the port list lives in `/etc/ai-model-bridge/services`. Strata itself never leaves `127.0.0.1`. The mechanism, and the address-based design it replaced, are explained in [kubernetes.md](kubernetes.md).
 
 `gpu-queue` and `litellm` are ordinary Services with pod selectors, because both actually run in the cluster.
 

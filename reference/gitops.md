@@ -27,7 +27,7 @@ It also means a template that fails to render fails on your terminal, in the for
 
 Argo CD cannot watch a directory. It reads git, Helm repositories or OCI registries, and nothing else. A path on disk is not something it knows how to poll.
 
-So `/srv/gitops` is a working tree with a bare repo behind it at `/srv/gitops.git`, and a read-only `git daemon` serves that bare repo on port 9418, bound to the cni0 address so only the cluster can reach it. Argo CD clones `git://gitops.platform.svc.cluster.local:9418/gitops.git` like any other remote.
+So `/srv/gitops` is a working tree with a bare repo behind it at `/srv/gitops.git`, and a read-only `git daemon` serves that bare repo on port 9418, bound to loopback: the cluster reaches it through a `host-model-proxy` unix socket like every other host service, and the LAN cannot reach it at all. Argo CD clones `git://gitops.platform.svc.cluster.local:9418/gitops.git` like any other remote.
 
 The daemon does not use `--export-all`. A repository is only served if it contains a `git-daemon-export-ok` marker file, so a second repo created in that directory later is not silently published.
 

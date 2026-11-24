@@ -40,6 +40,10 @@ charts/*.tgz
 # Argo CD would happily apply.
 .render-tmp/
 
+# Saved aside by server/08-gitops.sh when it migrates a chart whose values
+# it must replace. Local history, not desired state - never reconciled.
+*.v1-backup
+
 # Editor noise
 *.swp
 *~

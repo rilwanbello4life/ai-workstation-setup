@@ -9,9 +9,11 @@
 #            workload heavy enough that serialising it is the whole point of
 #            having a queue.
 #
-# ${HOST_IP} is substituted by server/09-gpu-queue.sh. Both addresses are
-# forwarded into loopback by ai-model-bridge.service, so neither service
-# binds anything beyond 127.0.0.1 itself.
+# These are ordinary selector Services; the proxy pods behind them, the
+# unix sockets they dial, and the host unit that owns those sockets all
+# belong to 03-host-models.yaml. Both host services are in the proxy and in
+# /etc/ai-model-bridge/services from the start, so applying 09-gpu-queue.sh
+# later adds nothing to the bridge - it only publishes the names.
 apiVersion: v1
 kind: Service
 metadata:
@@ -21,29 +23,13 @@ metadata:
     description: "nvidia-smi as JSON - utilisation and free VRAM, read-only"
 spec:
   type: ClusterIP
+  selector:
+    app.kubernetes.io/name: host-model-proxy
   ports:
     - name: http
       port: 8101
       targetPort: 8101
       protocol: TCP
----
-apiVersion: discovery.k8s.io/v1
-kind: EndpointSlice
-metadata:
-  name: gpu-probe-host
-  namespace: platform
-  labels:
-    kubernetes.io/service-name: gpu-probe
-addressType: IPv4
-ports:
-  - name: http
-    port: 8101
-    protocol: TCP
-endpoints:
-  - addresses:
-      - "${HOST_IP}"
-    conditions:
-      ready: true
 ---
 apiVersion: v1
 kind: Service
@@ -54,26 +40,10 @@ metadata:
     description: "ComfyUI on the host - batch image and video jobs"
 spec:
   type: ClusterIP
+  selector:
+    app.kubernetes.io/name: host-model-proxy
   ports:
     - name: http
       port: 8188
       targetPort: 8188
       protocol: TCP
----
-apiVersion: discovery.k8s.io/v1
-kind: EndpointSlice
-metadata:
-  name: comfyui-host
-  namespace: platform
-  labels:
-    kubernetes.io/service-name: comfyui
-addressType: IPv4
-ports:
-  - name: http
-    port: 8188
-    protocol: TCP
-endpoints:
-  - addresses:
-      - "${HOST_IP}"
-    conditions:
-      ready: true

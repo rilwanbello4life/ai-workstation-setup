@@ -8,8 +8,9 @@
 #   * kubeadm on a single node spends several GB to achieve the same thing
 #
 # What this does NOT do: run the models. Strata mlocks 25-30 GB, owns the GPU
-# and takes 1-3 minutes to load. It stays on the host, and pods reach it
-# through a Service with hand-written Endpoints. See:
+# and takes 1-3 minutes to load. It stays on the host; pods reach it through
+# a proxy DaemonSet dialing unix sockets this script installs on the host -
+# no host address appears in any of it. See:
 #   reference/kubernetes.md
 #   reference/server-architecture.md
 
@@ -213,19 +214,17 @@ ok "PersistentVolumes bound to $PLATFORM_DIR."
 # ---------------------------------------------------------------------------
 section "Host model bridge"
 
-# Pods need a stable name for services running on the host. A Service with no
-# selector plus hand-written EndpointSlices does this without hairpinning
-# through an ingress or hardcoding an IP into every workload.
-#
-# The host IP as seen from pods is the cni0 gateway, normally 10.42.0.1.
-HOST_IP="$(ip -4 addr show cni0 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1 | head -n1 || true)"
-if [[ -z "$HOST_IP" ]]; then
-    HOST_IP="10.42.0.1"
-    warn "cni0 has no address yet; assuming $HOST_IP."
-fi
-info "Pods will reach the host at $HOST_IP"
-
-export HOST_IP
+# Pods need stable names for services running on the host. The Services in
+# 03-host-models.yaml are ordinary selector Services; their endpoints are
+# pods of the host-model-proxy DaemonSet in the same file, each a socat in
+# normal pod network dialing a unix socket under /run/ai-model-bridge. The
+# host unit forwards those sockets to 127.0.0.1, so Strata and friends never
+# leave loopback and stay invisible to the LAN - while no manifest, value or
+# unit anywhere contains a host address. What used to live here instead was
+# a ${HOST_IP} pulled off cni0 and written into hand-made EndpointSlices,
+# which silently died whenever the forwarding unit died, and would have died
+# just as quietly had the pod CIDR ever changed. See the header of
+# 03-host-models.yaml for the full story.
 apply_manifest "$K8S_DIR/03-host-models.yaml"
 
 ok "Created in-cluster names for the host services:"
@@ -235,42 +234,28 @@ cat <<EOF
       http://voice.${K8S_NS}.svc.cluster.local:8100/v1
 EOF
 
-# Strata binds to 127.0.0.1 only, so pods cannot actually reach it yet. Rather
-# than rebinding it to 0.0.0.0 - which would expose it to the LAN - forward
-# just the cni0 address into loopback.
-section "Loopback forwarding"
+# Both halves of the bridge, installed together: the DaemonSet only
+# schedules where the node label says host models run, and the sockets only
+# exist where the unit runs.
+host_model_node_label
 
-FWD_UNIT=/etc/systemd/system/ai-model-bridge.service
-if [[ -f "$FWD_UNIT" ]]; then
-    ok "ai-model-bridge already installed."
-else
-    info "Installing a socat bridge from $HOST_IP to 127.0.0.1."
-    sudo apt-get install -y socat >/dev/null
+# gpu-probe and comfyui ship in the list from day one even though their own
+# phases come later - a forwarder with no upstream just refuses connections,
+# and 09-gpu-queue.sh no longer rewrites anything. 08-gitops.sh appends the
+# git daemon (9418) the same way.
+host_model_bridge_add strata    8080
+host_model_bridge_add llamacpp  8081
+host_model_bridge_add voice     8100
+host_model_bridge_add gpu-probe 8101
+host_model_bridge_add comfyui   8188
 
-    sudo tee "$FWD_UNIT" >/dev/null <<EOF
-[Unit]
-Description=Forward cluster-facing ports to loopback model servers
-After=k3s.service
-Wants=k3s.service
-
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-# One socat per port. Binding only to the cni0 address keeps these services
-# invisible to the LAN while letting pods reach them.
-ExecStart=/bin/sh -c '\
-  socat TCP-LISTEN:8080,bind=$HOST_IP,fork,reuseaddr TCP:127.0.0.1:8080 & \
-  socat TCP-LISTEN:8081,bind=$HOST_IP,fork,reuseaddr TCP:127.0.0.1:8081 & \
-  socat TCP-LISTEN:8100,bind=$HOST_IP,fork,reuseaddr TCP:127.0.0.1:8100 & \
-  wait'
-ExecStop=/usr/bin/pkill -f "socat TCP-LISTEN:80(80|81)|socat TCP-LISTEN:8100"
-
-[Install]
-WantedBy=multi-user.target
-EOF
-    sudo systemctl daemon-reload
-    sudo systemctl enable --now ai-model-bridge.service
-    ok "Bridge active on $HOST_IP ports 8080, 8081, 8100."
+# The old hand-written EndpointSlices have to be deleted, not merely stopped
+# being applied: pruning is off, so a slice no manifest mentions survives and
+# kube-proxy would serve it beside the new pod endpoints, sending a steady
+# share of every request to an address that no longer forwards anything.
+if kubectl -n "$K8S_NS" get endpointslice -o name 2>/dev/null | grep -q -- '-host$'; then
+    info "Removing hand-written EndpointSlices superseded by the proxy pods."
+    host_model_prune_slices strata llamacpp voice gpu-probe comfyui gitops
 fi
 
 # ---------------------------------------------------------------------------
