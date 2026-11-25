@@ -233,6 +233,23 @@ if [[ "$REMOVE" == yes ]]; then
             rm -f "$HOME/.config/strata/launch-presets/${tag}.json"
         fi
         ok "Removed $name."
+
+        # The ledger must hear about the removal too, or the removal is a
+        # lie to the next run: the pack keeps its 'ok' row, and the next
+        # --tier pass skips it outright on the source of truth, forever.
+        # Recorded as failed so the default --retry-failed refetches exactly
+        # what was deleted and nothing else. Ids match on the size part
+        # case-insensitively because the MODELS table spells the qwen quants
+        # lowercase while a removal name comes in as the person typed it.
+        while IFS= read -r lid; do
+            [[ -n "$lid" ]] && ledger_mark strata "$lid" failed \
+                "removed via --remove on this machine"
+        done < <(awk -F'\t' -v fam="$(tr 'A-Z' 'a-z' <<<"$fam")" -v size="$size" '
+            $1 == "strata" {
+                n = split($2, p, "/")
+                if (n == 2 && (fam == "" || p[1] == fam) && tolower(p[2]) == tolower(size))
+                    print $2
+            }' "$DOWNLOAD_LEDGER" 2>/dev/null)
     done
 
     echo
@@ -307,7 +324,7 @@ MODELS=(
     "gyro|Gyro-M|b|92|Gyro-M - ~IQ3_XXS quality, 35 GB across VRAM and RAM"
     "qwen36|UD-Q6_K_XL|b|33|Qwen3.6 6-bit - wants 44 GB RAM"
     "qwen|q2_0|cd|70|Flash-Next Q2_0 - 94 tok/s, needs 44 GB RAM"
-    "qwen|iq2_xs|cd|72|Flash-Next IQ2_XS - the default; largest that fits with the cluster up"
+    "qwen|iq2_xs|cd|72|Flash-Next IQ2_XS - 79 tok/s, kept beside IQ3_S for speed"
     "qwen|iq3_xxs|d|74|Flash-Next IQ3_XXS - needs 53 GB RAM"
     "swift|IQ2_XS|d|68|Swift 1.5 - IQ2_XS quality, much shorter thinking"
     "qwen36|Q8_0|d|38|Qwen3.6 8-bit - closest to the full 35B"
@@ -476,9 +493,15 @@ fi
 # They stay in the tiers because the tiers describe 32 and 64 GB machines too,
 # where several of them are the best available. The marker is advisory; it
 # changes what is printed, never what is installed.
+# qwen/Q2_0 and qwen/IQ2_XS are deliberately NOT on this list. They lose on
+# quality but not on speed - 94 and 79 tok/s against IQ3_S's 53 - and this
+# machine has chosen to hold that fast pair beside the accurate one, paying
+# the Q2_0 quality cliff for generations that arrive twice as fast. The
+# reasoning is in reference/strata-models.md; adding either name back here
+# means that decision has been reversed, so re-read it before doing it.
 # One line deliberately. Wrapping it put a newline where the membership test
 # expects a space, and the entry beside the break silently stopped matching.
-SUPERSEDED_96="qwen/q2_0 qwen/iq2_xs qwen/iq3_xxs gyro/Gyro-S gyro/Gyro-M swift/IQ2_XS qwen36/UD-Q4_K_XL qwen36/UD-Q6_K_XL"
+SUPERSEDED_96="qwen/iq3_xxs gyro/Gyro-S gyro/Gyro-M swift/IQ2_XS qwen36/UD-Q4_K_XL qwen36/UD-Q6_K_XL"
 
 # 85, not 90. This machine fills four DIMMs to 96 GB and MemTotal reports
 # 89 - lower than the ~93 the comment at the top of this file predicted,
@@ -894,6 +917,21 @@ if (( RECONCILED_N > 0 )); then
     ok "$RECONCILED_N pack(s) are already in the Strata store; they will be skipped."
 fi
 
+# What this stop is for now: RAM and VRAM, not the refusal. The loop passes
+# --restart, so a pack serving at any point in the run - including one a live
+# monitor session re-serves between two entries - gets stopped and replaced
+# rather than refusing on exit 6. Freeing the incumbent before the first fetch
+# still matters on its own: 125B packs pin 25-62 GB of system RAM while loaded
+# (the cluster's own ~15 GB sits on top of that), and a fetch that starts
+# beside a resident pack starts with less of the machine to itself.
+# It costs nothing when nothing is up: launch --status is a read-only question.
+if [[ "$DO_INSTALL" == yes ]] && strata launch --status >/dev/null 2>&1; then
+    info "A Strata pack is serving. Stopping it first; the run will end with nothing resident."
+    strata launch --stop >/dev/null 2>&1 \
+        || warn "Could not stop it - if it is still serving, the first launch will refuse."
+    sleep 3
+fi
+
 installed=()
 failed=()
 
@@ -929,15 +967,23 @@ for entry in "${selected[@]}"; do
     fi
 
     # --yes skips prompts, --no-tui serves and returns instead of opening the
-    # monitor, --save-preset makes switching to it a one-liner later - and the
-    # engine settings from ubuntu/common.sh are in this call, so they end up
-    # inside the saved preset rather than only beside it: switching to this
+    # monitor, --save-preset makes switching to it a one-liner later, and
+    # --restart makes the incumbent rule the loop's own rather than a race:
+    # a stop between packs is a window, and a live monitor session re-serves
+    # its pack inside that window (that is exactly what coder's monitor does -
+    # launch --stop takes the runtime down, the monitor relaunches it about
+    # two minutes later), so without --restart a later entry in the run gets
+    # refused on exit 6 while an earlier one in the same run downloaded fine.
+    # --restart stops whatever is serving and starts this one, which is also
+    # what the run already promises: it ends with nothing resident.
+    # The engine settings from ubuntu/common.sh are in this call, so they end
+    # up inside the saved preset rather than only beside it: switching to this
     # pack by hand, from the Desktop, or from ai-resume carries them without
     # any of those paths knowing the list exists.
     rc=0
     strata_args_for "$fam"
     "${MEM_GUARD[@]}" strata launch --family "$fam" --model "$mod" \
-                     --yes --no-tui --save-preset "$preset" \
+                     --yes --no-tui --restart --save-preset "$preset" \
                      "${STRATA_ARGS[@]}" || rc=$?
 
     if (( rc == 0 )); then

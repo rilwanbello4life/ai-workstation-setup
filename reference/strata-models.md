@@ -153,9 +153,9 @@ Which store a pack lands in depends on what `data_dir` was set to when it was in
 
 There is **no remove verb**. `strata models` offers `list, inspect, explain, import, move` and nothing else, so removal is `rm -rf` on directories you have confirmed with `explain`.
 
-### Keep these six — the ones I am confident run here
+### Keep these eight — the ones I am confident run here
 
-Sizes below are **measured on this machine** with `du -sh`, not catalogue download figures — they include the MTP draft layer and the picture reader, so they run larger than the download column in the tier tables.
+Sizes below are **measured on this machine** with `du -sh`, not catalogue download figures — they include the MTP draft layer and the picture reader, so they run larger than the download column in the tier tables. One caveat on the three Flash-Next rows: shard 2 is a single 26.8 GB n-gram table that Strata hardlinks under `Q2_0`, `IQ2_XS` and `IQ3_S`, so a per-pack `du` counts that same table three times across the rows. The unique shard inside each is what deleting it actually takes back — 35 GB for Q2_0, 36.5 GB for IQ2_XS, 51 GB for IQ3_S.
 
 | Pack | Params | On disk | Experts in RAM | Top-1 vs Q8_0 | Runs | What to expect |
 |---|---|---:|---:|---:|---|---|
@@ -163,10 +163,12 @@ Sizes below are **measured on this machine** with `du -sh`, not catalogue downlo
 | **`nvfp4/NVFP4`** | 125B / 6B active | 120 GB | 70 GB | not published | after `ai-pause`, 9 GB margin | The only pack built for your card's FP4 tensor cores. A comfortable margin, unlike the one above, so this is the realistic paused-mode default. |
 | **`unsloth/UD-IQ4_XS`** | 125B / 6B active | 88 GB | 62 GB | 88.9% | cluster up, 2 GB margin | The best quality that runs while the platform is up. Measure it once before relying on it; 2 GB is inside the noise. |
 | **`qwen/IQ3_S`** | 125B / 6B active | 78 GB | 50 GB | 87.7% | cluster up, comfortable | **The day-to-day default.** 1.2 points behind UD-IQ4_XS for 12 GB less memory and real headroom. ~53 tok/s, slower on four DIMMs. |
+| **`qwen/IQ2_XS`** | 125B / 6B active | 64 GB | ~45.5 GB | — | cluster up, comfortable | **Kept for speed, not quality.** 79 tok/s against IQ3_S's 53 — back on the drive deliberately, for answers at roughly the rate the default needs to buy a third of its points. |
+| **`qwen/Q2_0`** | 125B / 6B active | 62 GB | ~44 GB | 80.6% | cluster up, comfortable | **94 tok/s — the fastest thing this machine can run.** Also the cliff: perplexity 4.475 against the 4.052 reference, ~10% worse while everything above sits within 2%. A speed keep with the price visible, never a default. |
 | **`coder/IQ1_M`** | 125B coder fine-tune | ~75 GB | 23 GB | n/a | always | The coding instrument, ~55 tok/s. IQ1 is not a compromise here: it is a different model trained for one job, and deliberately weak outside code and English. |
 | **`qwen36/Q8_0`** | 35B / 3B active | 37 GB | ~10 GB | closest to the full 35B | always | A different base model, not a smaller Flash-Next. Apache 2.0, accepts video, light enough to run beside other work. For when the 125B is overkill. |
 
-Six packs, about **500 GB**: a quality ceiling, a hardware-native option, a working best, a comfortable default, a coder and a lightweight generalist.
+Eight packs: the rows sum to about **628 GB**, the drive carries about **575 GB** of it — the shared table above is one file counted three times. That is a quality ceiling, a hardware-native option, a working best, a comfortable default, a coder, a lightweight generalist, and a fast pair (IQ2_XS, Q2_0) kept for tok/s rather than scores.
 
 **On the margins.** Those figures of 9 GB, 2 GB and 1 GB are the difference between a pack's experts and your available RAM, and they are the numbers on this page most worth distrusting — expert sizes are published approximations, not measurements of your install. A 9 GB margin is safe. A 2 GB margin is probably fine. A 1 GB margin is a coin toss, and the failure mode is the OOM killer choosing a victim somewhere else, usually Postgres.
 
@@ -174,10 +176,10 @@ Six packs, about **500 GB**: a quality ceiling, a hardware-native option, a work
 
 Every pack here is **outclassed by a pack you already have and can run**. That is the only criterion applied: not size, not age, but that something better fits in the same machine.
 
+The criterion is quality, and it has exactly one deliberate exception: `qwen/Q2_0` and `qwen/IQ2_XS` have been re-downloaded as the **fast pair** — kept for their 94 and 79 tok/s against IQ3_S's 53, not for their scores. They live in the keep list above with the cliff spelled out; do not move them back here without re-reading that trade.
+
 | Pack | Outclassed by | The argument |
 |---|---|---|
-| `qwen/Q2_0` | `qwen/IQ3_S` | 80.6% top-1 and perplexity 4.475, against IQ3_S's 87.7% and 4.097. **This is the pack below the quality cliff** — everything above it sits within 2% of the reference and Q2_0 jumps about 10%. It bought speed on a machine that could not hold anything larger. Yours can. |
-| `qwen/IQ2_XS` | `qwen/IQ3_S` | It was the recommended default at 64 GB because it was the largest pack that coexisted with the cluster. That constraint is the only reason it was ever the answer, and it is gone — IQ3_S coexists with the cluster now, and scores higher. |
 | `qwen/IQ3_XXS` | `qwen/IQ3_S` | 84.5% against 87.7%, for 7 GB less RAM. Same family, same shape, three points worse. There is no situation on this machine where you would choose it. |
 | `gyro/Gyro-S` | `qwen/IQ3_S` | Gyro-S exists to keep every expert on a machine that cannot hold a decent quantisation — the full-expert fallback. You are no longer that machine, and IQ3_S beats it outright. |
 | `gyro/Gyro-M` | `qwen/IQ3_S` | The largest single win here: ~92 GB for roughly IQ3_XXS quality, which IQ3_S already beats. Its distinguishing feature is using ~20% less GPU memory, which matters when VRAM is the binding constraint. Yours is RAM, so it buys nothing. |
@@ -185,7 +187,7 @@ Every pack here is **outclassed by a pack you already have and can run**. That i
 | `qwen36/UD-Q6_K_XL` | `qwen36/Q8_0` | Same argument, smaller gap. Q6 is close to Q8 on this model, but "close to something you already own" is not a reason to hold 33 GB. |
 | `swift/IQ2_XS` | `qwen/IQ3_S`, **with a caveat** | Quality-wise it matches IQ2_XS, which IQ3_S beats, so by the criterion above it goes. But quality was never its argument. Flash-Next thinks at `xhigh` by default and can reason at length before answering; Swift is a fine-tune that thinks much shorter at the same quality. It is the fastest-to-useful-answer model you own, not the best. **Decide on behaviour rather than benchmarks:** if verbose reasoning irritates you in daily use, keep it. If `reasoning_effort` on the API is control enough, take back the 64 GB. |
 
-**Roughly 420 GB**, and not one of them is something you would choose over a pack you are keeping.
+**Now roughly 320 GB** — the fast pair came back down this ladder on its own terms — and not one of them is something you would choose over a pack you are keeping.
 
 ### Too big for this machine — identified, not deleted
 
@@ -230,7 +232,7 @@ Three cautions learned on this machine:
 
 ### What a deletion actually frees — less than `explain` reports
 
-Measured, not predicted. Deleting `Q2_0`, `IQ2_XS` and `IQ3_XXS` — which `explain` totals at **210 GB** — returned **116 GiB**.
+Measured, not predicted. Deleting `Q2_0`, `IQ2_XS` and `IQ3_XXS` — which `explain` totals at **210 GB** — returned **116 GiB**. (`Q2_0` and `IQ2_XS` have since been re-downloaded deliberately as the fast pair; their unique shards went back up, ~77 GB, and the shared 29 GB table never left — `qwen/IQ3_S` still references it.)
 
 The arithmetic says exactly why. Each of those packs is two files: a unique quantised shard, and a second shard of 28.80 GB that is byte-identical across all three. Sum the unique shards only — 37.62 + 39.23 + 47.04 = 123.89 GB — and convert to the GiB `df` reports, and you get **115.4 GiB** against 116 observed.
 
